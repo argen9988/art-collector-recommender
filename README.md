@@ -71,6 +71,7 @@ Google Cloud SQL 官方 24 小時連續開機的牌價，在 `db-f1-micro`（約
 
 - **調整預算與驗收數字**：打開 `D:\Dev\company\art-collector-recommender\config\params.json`，可直接修改 `budget_monthly_ntd`（每月預算）、`eval_question_count`（測試題數）等欄位，改完存檔立即生效，不需改程式碼。
 - **閱讀完整評估報告與給部長的信**：見 `D:\Dev\company\art-collector-recommender\docs\assessment-and-sop.md`。
+- **閱讀「排程與客製化 EDM」開發者實作指南與收費標準**：見 `D:\Dev\company\art-collector-recommender\docs\edm-feature-implementation-and-pricing.md`（亦同步存於 `D:\TTT\待處理\藏家推薦系統_排程與客製化EDM開發指南與收費標準.md`）。
 
 ---
 

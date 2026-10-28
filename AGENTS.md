@@ -27,10 +27,11 @@ D:\Dev\company\art-collector-recommender\
 │   ├── gcp-setup-and-check.sh       # 雲端 GCP 資安檢查與互動設定腳本
 │   └── code-and-ai-audit.mjs        # 本機原始碼金鑰掃描與 AI 推薦品質驗收腳本
 └── docs/
-    ├── assessment-and-sop.md        # 專案概況、時程、六大資安 SOP 與部長信件完整報告
-    ├── todo-plan.md                 # 待辦清單（只留未完成項目）
-    ├── worklog/                     # 施工紀錄（分月存）
-    └── decisions/                   # 決策紀錄（分月存）
+    ├── assessment-and-sop.md                     # 專案概況、時程、六大資安 SOP 與部長信件完整報告
+    ├── edm-feature-implementation-and-pricing.md # 排程發送客製化 EDM 開發者實作指南與收費標準說明
+    ├── todo-plan.md                              # 待辦清單（只留未完成項目）
+    ├── worklog/                                  # 施工紀錄（分月存）
+    └── decisions/                                # 決策紀錄（分月存）
 ```
 
 ## 資料模型與參數定義
