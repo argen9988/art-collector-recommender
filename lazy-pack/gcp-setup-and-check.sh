@@ -60,8 +60,8 @@ read_json_int() {
     return 0
   fi
   local val
-  val="$(grep -E "\"${key}\"[[:space:]]*:[[:space:]]*[0-9]+" "$file" | tail -n 1 | sed -E 's/.*:[[:space:]]*([0-9]+).*/\1/')"
-  if [ -z "$val" ] || ! [[ "$val" =~ ^[0-9]+$ ]]; then
+  val="$(grep -E "^  \"${key}\"[[:space:]]*:[[:space:]]*-?[0-9]+" "$file" | tail -n 1 | sed -E 's/.*:[[:space:]]*(-?[0-9]+).*/\1/')"
+  if [ -z "$val" ] || ! [[ "$val" =~ ^-?[0-9]+$ ]]; then
     echo "注意：參數檔 ${file} 的 ${key} 讀不到或格式不合法，這次照預設值 ${default_val} 跑。" >&2
     echo "$default_val"
     return 0
@@ -290,7 +290,7 @@ else
   echo "📌 偵測到 Cloud SQL 實例：${SQL_INSTANCE} (目前規格: ${CURRENT_TIER}, 狀態策略: ${ACTIVATION_POLICY})"
 
   # 5a. 公網 IP 檢查
-  if [ "$IPV4_ENABLED" = "False" ] || [ "$IPV4_ENABLED" = "false" ]; then
+  if [ "$IPV4_ENABLED" = "False" ] || [ "$IPV4_ENABLED" = "false" ] || [ -z "$IPV4_ENABLED" ]; then
     echo "✅ [已存在，跳過] Cloud SQL 公網 IP (Public IP) 已關閉，外部網路無法直接掃描攻擊。"
     SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
   else
@@ -432,14 +432,15 @@ if [ "$VERTEX_ENABLED" = "true" ]; then
   SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
 else
   echo "ℹ️  目前專案尚未啟用 Vertex AI API（此項為【非必要選配】，現況維持使用 Google AI Studio 架構即可）。"
-  echo "   請選擇本專案要採用的 AI 呼叫模式："
-  echo "   [1] 維持 Google AI Studio（Paid Tier 付費層）＋ Secret Manager 金鑰隔離（預設推薦，直接跳過）"
-  echo "       （優點：100% 相容 AI Studio 內建預覽與一鍵部署，同享資料不訓練模型保障）"
-  echo "   [2] 選配啟用 Google Cloud Vertex AI（自動開啟 API 並授權 Cloud Run 服務帳戶）"
-  echo "       （優點：免管理靜態 API Key、可強制指定 asia-east1 台灣彰濱機房運算與完整 Audit Logs）"
-  echo ""
 
   if [ "$MODE" = "interactive" ] || [ "$MODE" = "dry-run" ]; then
+    echo "   請選擇本專案要採用的 AI 呼叫模式："
+    echo "   [1] 維持 Google AI Studio（Paid Tier 付費層）＋ Secret Manager 金鑰隔離（預設推薦，直接跳過）"
+    echo "       （優點：100% 相容 AI Studio 內建預覽與一鍵部署，同享資料不訓練模型保障）"
+    echo "   [2] 選配啟用 Google Cloud Vertex AI（自動開啟 API 並授權 Cloud Run 服務帳戶）"
+    echo "       （優點：免管理靜態 API Key、可強制指定 asia-east1 台灣彰濱機房運算與完整 Audit Logs）"
+    echo ""
+
     if [ "$MODE" = "dry-run" ]; then
       ai_arch_choice="1"
       echo "👉 [Dry-Run 模擬選擇]: 預設選 [1] 維持 Google AI Studio (Paid Tier，跳過)"
@@ -466,6 +467,9 @@ else
       echo "✅ [非必要選配，跳過] 維持採用 Google AI Studio (Paid Tier) 架構。"
       SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
     fi
+  else
+    echo "✅ [非必要選配，跳過] 唯讀體檢模式：目前未啟用 Vertex AI，維持 Google AI Studio 架構即可。"
+    SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
   fi
 fi
 
@@ -492,17 +496,21 @@ else
   fi
 fi
 
+CHECK_EDM_SECRETS="false"
+
 if [ "$SCHEDULER_ENABLED" = "true" ]; then
   echo "✅ [已存在，跳過] Cloud Scheduler 排程服務 API (cloudscheduler.googleapis.com) 已啟用！"
   SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
+  CHECK_EDM_SECRETS="true"
 else
   echo "ℹ️  目前專案尚未啟用 Cloud Scheduler API（此項為【非必要選配】）。"
-  echo "   請選擇是否要啟用排程自動發送 EDM 相關雲端組件："
-  echo "   [1] 暫不啟用（非必要選項：維持人工手動操作或留待後續階段擴充，直接跳過）"
-  echo "   [2] 選配啟用 Cloud Scheduler API 並檢查/建立 EDM 專屬密鑰 (EDM_API_KEY / CRON_SECRET)"
-  echo ""
 
   if [ "$MODE" = "interactive" ] || [ "$MODE" = "dry-run" ]; then
+    echo "   請選擇是否要啟用排程自動發送 EDM 相關雲端組件："
+    echo "   [1] 暫不啟用（非必要選項：維持人工手動操作或留待後續階段擴充，直接跳過）"
+    echo "   [2] 選配啟用 Cloud Scheduler API 並檢查/建立 EDM 專屬密鑰 (EDM_API_KEY / CRON_SECRET)"
+    echo ""
+
     if [ "$MODE" = "dry-run" ]; then
       edm_sched_choice="1"
       echo "👉 [Dry-Run 模擬選擇]: 預設選 [1] 暫不啟用排程自動發送 EDM (跳過)"
@@ -518,30 +526,36 @@ else
       fi
       echo "✅ 已啟用 Cloud Scheduler API！後續可設定定時觸發 /api/cron/send-edm（單日上限建議鎖定 ${EDM_DAILY_SEND_LIMIT} 封）。"
       FIXED_COUNT=$((FIXED_COUNT + 1))
-
-      for EDM_SEC in "EDM_API_KEY" "CRON_SECRET"; do
-        if [ "$MODE" != "dry-run" ] && gcloud secrets describe "$EDM_SEC" --project="$PROJECT_ID" >/dev/null 2>&1; then
-          echo "✅ [已存在，跳過] Secret Manager 中已存在 EDM 密鑰：${EDM_SEC}"
-          SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
-        elif [ "$MODE" = "interactive" ]; then
-          read -r -p "👉 是否順便於 Secret Manager 建立 ${EDM_SEC}？[y/N]: " create_edm_sec
-          if [[ "$create_edm_sec" =~ ^[Yy]$ ]]; then
-            gcloud services enable secretmanager.googleapis.com --project="$PROJECT_ID"
-            read -r -s -p "請貼上 ${EDM_SEC} 的值（輸入時不顯示明文，按 Enter 結束）: " edm_sec_val
-            echo ""
-            if [ -n "$edm_sec_val" ]; then
-              printf "%s" "$edm_sec_val" | gcloud secrets create "$EDM_SEC" --data-file=- --project="$PROJECT_ID"
-              echo "✅ 已建立 EDM 密鑰 ${EDM_SEC}！"
-              FIXED_COUNT=$((FIXED_COUNT + 1))
-            fi
-          fi
-        fi
-      done
+      CHECK_EDM_SECRETS="true"
     else
       echo "✅ [非必要選配，跳過] 暫不啟用 Cloud Scheduler 自動排程發信。"
       SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
     fi
+  else
+    echo "✅ [非必要選配，跳過] 唯讀體檢模式：目前未啟用 Cloud Scheduler 自動排程發信，維持現況即可。"
+    SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
   fi
+fi
+
+if [ "$CHECK_EDM_SECRETS" = "true" ]; then
+  for EDM_SEC in "EDM_API_KEY" "CRON_SECRET"; do
+    if [ "$MODE" != "dry-run" ] && gcloud secrets describe "$EDM_SEC" --project="$PROJECT_ID" >/dev/null 2>&1; then
+      echo "✅ [已存在，跳過] Secret Manager 中已存在 EDM 密鑰：${EDM_SEC}"
+      SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
+    elif [ "$MODE" = "interactive" ]; then
+      read -r -p "👉 是否順便於 Secret Manager 建立選配之 ${EDM_SEC}？[y/N]: " create_edm_sec
+      if [[ "$create_edm_sec" =~ ^[Yy]$ ]]; then
+        gcloud services enable secretmanager.googleapis.com --project="$PROJECT_ID"
+        read -r -s -p "請貼上 ${EDM_SEC} 的值（輸入時不顯示明文，按 Enter 結束）: " edm_sec_val
+        echo ""
+        if [ -n "$edm_sec_val" ]; then
+          printf "%s" "$edm_sec_val" | gcloud secrets create "$EDM_SEC" --data-file=- --project="$PROJECT_ID"
+          echo "✅ 已建立 EDM 密鑰 ${EDM_SEC}！"
+          FIXED_COUNT=$((FIXED_COUNT + 1))
+        fi
+      fi
+    fi
+  done
 fi
 
 # ------------------------------------------------------------------------------

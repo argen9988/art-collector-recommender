@@ -121,9 +121,9 @@ function scanCodebase(targetDir) {
   let nextPublicLeakCount = 0;
   let clientSdkLeakCount = 0;
 
-  const apiKeyRegex = /(?:AIza[0-9A-Za-z_-]{35}|re_[0-9A-Za-z_]{20,}|SG\.[0-9A-Za-z_-]{20,})/g;
-  const dbUrlRegex = /postgres(?:ql)?:\/\/[^/\s"']+:[^@\s"']+@[^/\s"']+/gi;
-  const nextPublicSensitiveRegex = /NEXT_PUBLIC_[A-Z0-9_]*(?:KEY|SECRET|PASSWORD|TOKEN|DATABASE|SMTP|EDM)/g;
+  const apiKeyRegex = /(?:AIza[0-9A-Za-z_-]{35}|re_[0-9A-Za-z_]{20,}|SG\.[0-9A-Za-z_-]{20,})/;
+  const dbUrlRegex = /postgres(?:ql)?:\/\/[^/\s"']+:[^@\s"']+@[^/\s"']+/i;
+  const nextPublicSensitiveRegex = /NEXT_PUBLIC_[A-Z0-9_]*(?:KEY|SECRET|PASSWORD|TOKEN|DATABASE|SMTP|EDM)/;
 
   for (const file of files) {
     const content = fs.readFileSync(file, 'utf-8');

@@ -36,19 +36,19 @@ D:\Dev\company\art-collector-recommender\
 
 ## 資料模型與參數定義
 
-- 所有可調門檻集中於 `config/params.json`（含 `"_說明"`），包含每月預算警示 `budget_monthly_ntd`（現在是 1000）、資料庫目標月租 `db_target_monthly_ntd`（現在是 550）、API 每日上限 `api_quota_rpd`（現在是 1000）、每分鐘上限 `api_quota_rpm`（現在是 30）、備份天數 `backup_retention_days`（現在是 14）、每日 EDM 發送上限 `edm_daily_send_limit`（現在是 100）、驗收題數 `eval_question_count`（現在是 20）。
+- 所有可調門檻集中於 `config/params.json`（含 `"_說明"`），包含每月預算警示 `budget_monthly_ntd`（現在是 1000）、資料庫目標月租 `db_target_monthly_ntd`（現在是 550）、API 每日上限 `api_quota_rpd`（現在是 1000）、每分鐘上限 `api_quota_rpm`（現在是 30）、備份天數 `backup_retention_days`（現在是 14）、每日 EDM 發送上限 `edm_daily_send_limit`（現在是 100）、驗收題數 `eval_question_count`（現在是 20）、測試藏家預算上限 `eval_max_budget_ntd`（現在是 200000）、驗收合格門檻百分比 `eval_pass_threshold_pct`（現在是 100）。
 
 ## 業務規則精確定義
 
 1. **所有自動化檢查與設定皆須具備冪等性（Idempotency）**：執行任何變更前，先查詢現況；若該項設定已存在且符合安全標準，印出 `✅ 已存在，跳過`，不重複覆寫。
-2. **Cloud SQL 規格採互動式選擇**：腳本不強制降級為最低規格，而是列出 5 種方案（含 NT$500–600/月 之 `db-g1-small` 搭配上下班自動啟停排程，或 `db-f1-micro` 加大儲存與 30 天 PITR 備份）供執行者討論決定。
+2. **Cloud SQL 規格採互動式選擇**：腳本不強制降級為最低規格，而是列出 6 種方案（含維持現況、NT$500–600/月 之 `db-g1-small` 搭配上下班自動啟停排程，或 `db-f1-micro` 加大儲存與 30 天 PITR 備份）供執行者討論決定。
 3. **前端零機密原則**：任何含 `AIza`、`postgres://` 或未加白名單之敏感變數，不得出現於前端 bundle 或 `NEXT_PUBLIC_` 變數中。
 
 ## 核心流程
 
 1. **第一波（立即止血）**：綁定 Billing 切換 Paid Tier ➔ 設定預算警示與 API Quota ➔ 設定 OAuth 測試白名單。
 2. **第二波（架構加固）**：於 GCP Cloud Shell 執行 `lazy-pack/gcp-setup-and-check.sh` 隔離金鑰至 Secret Manager、關閉 Cloud SQL 公網 IP 並選定資料庫規格。
-3. **第三波（上線體檢）**：於本機執行 `lazy-pack/code-and-ai-audit.mjs` 掃描程式碼並完成 20 題 AI 推薦精準度與防注入測試。
+3. **第三波（上線體檢）**：於本機執行 `lazy-pack/code-and-ai-audit.mjs` 掃描程式碼並完成 AI 推薦精準度與防注入測試（現在是 20 題，見 `config/params.json` 的 `eval_question_count`）。
 
 ## 開發時踩過的坑
 
