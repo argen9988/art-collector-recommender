@@ -91,15 +91,17 @@ fi
 echo "=============================================================================="
 echo " 🎨 藏家推薦系統 — GCP 雲端資安檢查與互動設定懶人包 (模式: ${MODE})"
 echo "=============================================================================="
-echo " 📋 【本 Lazy Pack 將為您執行的 8 項工作總覽】："
+echo " 📋 【本 Lazy Pack 將為您執行的 8 項工作總覽（1~6 為核心項目，7~8 為非必要選配項）】："
+echo "   ── 核心必備防線（第 1～6 關）──"
 echo "   1. [資料隱私保護] 檢查專案是否已綁定計費帳戶（Paid Tier，確保藏家資料不拿去訓練模型）"
 echo "   2. [帳號備援治理] 檢查是否具備 2 位以上專案共同 Owner（防止單一人員異動造成維運孤島）"
 echo "   3. [成本與登入防線] 檢查每月預算警示 (NT\$${BUDGET_MONTHLY_NTD})、API 每日配額 (${API_QUOTA_RPD}次) 與同仁 Gmail 白名單"
-echo "   4. [機敏金鑰隔離] 檢查並協助於 Secret Manager 建立 GEMINI_API_KEY、DATABASE_URL、EDM_API_KEY、CRON_SECRET"
+echo "   4. [機敏金鑰隔離] 檢查並協助於 Secret Manager 建立核心密鑰 (GEMINI_API_KEY、DATABASE_URL)"
 echo "   5. [資料庫內網防護] 檢查並協助關閉 Cloud SQL 公網 IP、開啟強制 SSL 加密與每日自動備份 (${BACKUP_RETENTION_DAYS}天)"
-echo "   6. [資料庫規格討論] 檢視目前 Cloud SQL 規格，提供含 NT\$500–600/月 甜區在內之 5 種方案供選擇"
-echo "   7. [AI 架構選型] 檢查並讓您選擇維持「Google AI Studio (Paid Tier)」或升級啟用「Vertex AI (台灣機房/免金鑰)」"
-echo "   8. [排程推播 EDM] 檢查並協助啟用 Cloud Scheduler 排程服務（供不定期/定期「以人推畫、以畫推人」發送 EDM）"
+echo "   6. [資料庫規格討論] 檢視目前 Cloud SQL 規格，提供含 NT\$500–600/月 甜區在內之 6 種方案供選擇"
+echo "   ── 🟢 非必要選配項目（第 7～8 關，預設不啟用可直接跳過）──"
+echo "   7. [選配：啟用 Vertex AI] 選擇維持「Google AI Studio (Paid Tier)」或選配啟用「Vertex AI (台灣機房/免金鑰)」"
+echo "   8. [選配：排程發送 EDM] 條列說明並選擇是否啟用「Cloud Scheduler API」與 EDM 密鑰（供自動「以人推畫/以畫推人」發信）"
 echo ""
 echo " 💡 【運作原則】：所有步驟皆會「先檢查現況」，已經設定好的項目會自動標記『✅ 已存在，跳過』；"
 echo "    需要調整的項目會先徵詢您的同意才執行，絕不擅自覆蓋既有設定。"
@@ -216,16 +218,16 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# 關卡 4：【第二波】檢查 Secret Manager 金鑰隔離（含 AI、資料庫、排程與 EDM 金鑰）
+# 關卡 4：【第二波】檢查 Secret Manager 核心金鑰隔離（AI 與資料庫金鑰）
 # ------------------------------------------------------------------------------
 echo ""
 echo "------------------------------------------------------------------------------"
-echo "🔍 [關卡 4/8] 檢查 Secret Manager 機敏金鑰是否已建立 (GEMINI_API_KEY / DATABASE_URL / EDM_API_KEY / CRON_SECRET)..."
+echo "🔍 [關卡 4/8] 檢查 Secret Manager 核心機敏金鑰是否已建立 (GEMINI_API_KEY / DATABASE_URL)..."
 
-for SECRET_NAME in "GEMINI_API_KEY" "DATABASE_URL" "EDM_API_KEY" "CRON_SECRET"; do
+for SECRET_NAME in "GEMINI_API_KEY" "DATABASE_URL"; do
   SECRET_EXISTS="false"
   if [ "$MODE" = "dry-run" ]; then
-    if [ "$SECRET_NAME" = "GEMINI_API_KEY" ] || [ "$SECRET_NAME" = "CRON_SECRET" ]; then
+    if [ "$SECRET_NAME" = "GEMINI_API_KEY" ]; then
       SECRET_EXISTS="true"
     fi
   else
@@ -410,11 +412,11 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# 關卡 7：【互動選型】AI 呼叫架構選型（維持 AI Studio Paid Tier vs. 啟用 Vertex AI）
+# 關卡 7：【🟢 非必要選配 1】AI 呼叫架構選型（維持 AI Studio Paid Tier vs. 啟用 Vertex AI）
 # ------------------------------------------------------------------------------
 echo ""
 echo "------------------------------------------------------------------------------"
-echo "💬 [關卡 7/8] 檢查 AI 模型呼叫架構（Google AI Studio Paid Tier vs. Vertex AI）..."
+echo "💬 [關卡 7/8] 【🟢 非必要選配項】AI 模型呼叫架構（維持 AI Studio Paid Tier vs. 啟用 Vertex AI）..."
 
 VERTEX_ENABLED="false"
 if [ "$MODE" = "dry-run" ]; then
@@ -429,20 +431,20 @@ if [ "$VERTEX_ENABLED" = "true" ]; then
   echo "✅ [已存在，跳過] 專案已啟用 Vertex AI API (aiplatform.googleapis.com)！"
   SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
 else
-  echo "ℹ️  目前專案尚未啟用 Vertex AI API（現況為使用 Google AI Studio 架構）。"
+  echo "ℹ️  目前專案尚未啟用 Vertex AI API（此項為【非必要選配】，現況維持使用 Google AI Studio 架構即可）。"
   echo "   請選擇本專案要採用的 AI 呼叫模式："
-  echo "   [1] 維持 Google AI Studio（Paid Tier 付費層）＋ Secret Manager 金鑰隔離"
+  echo "   [1] 維持 Google AI Studio（Paid Tier 付費層）＋ Secret Manager 金鑰隔離（預設推薦，直接跳過）"
   echo "       （優點：100% 相容 AI Studio 內建預覽與一鍵部署，同享資料不訓練模型保障）"
-  echo "   [2] 升級啟用 Google Cloud Vertex AI（自動開啟 API 並授權 Cloud Run 服務帳戶）"
+  echo "   [2] 選配啟用 Google Cloud Vertex AI（自動開啟 API 並授權 Cloud Run 服務帳戶）"
   echo "       （優點：免管理靜態 API Key、可強制指定 asia-east1 台灣彰濱機房運算與完整 Audit Logs）"
   echo ""
 
   if [ "$MODE" = "interactive" ] || [ "$MODE" = "dry-run" ]; then
     if [ "$MODE" = "dry-run" ]; then
       ai_arch_choice="1"
-      echo "👉 [Dry-Run 模擬選擇]: 預設選 [1] 維持 Google AI Studio (Paid Tier)"
+      echo "👉 [Dry-Run 模擬選擇]: 預設選 [1] 維持 Google AI Studio (Paid Tier，跳過)"
     else
-      read -r -p "👉 請輸入您的選擇 [1-2，預設 1 維持 AI Studio]: " ai_arch_choice
+      read -r -p "👉 請輸入您的選擇 [1-2，預設 1 維持現況跳過]: " ai_arch_choice
       ai_arch_choice="${ai_arch_choice:-1}"
     fi
 
@@ -461,24 +463,29 @@ else
       echo "💡 後端程式碼只需將初始化改為：new GoogleGenAI({ vertexai: true, project: '${PROJECT_ID}', location: 'asia-east1' })"
       FIXED_COUNT=$((FIXED_COUNT + 1))
     else
-      echo "✅ [維持現況，跳過] 維持採用 Google AI Studio (Paid Tier) 架構。"
+      echo "✅ [非必要選配，跳過] 維持採用 Google AI Studio (Paid Tier) 架構。"
       SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
     fi
   fi
 fi
 
 # ------------------------------------------------------------------------------
-# 關卡 8：【排程推播 EDM】檢查 Cloud Scheduler 排程服務（以人推畫 / 以畫推人 EDM）
+# 關卡 8：【🟢 非必要選配 2】排程發送客製化 EDM（以人推畫 / 以畫推人）之 Cloud Scheduler API 檢查與啟用
 # ------------------------------------------------------------------------------
 echo ""
 echo "------------------------------------------------------------------------------"
-echo "🔍 [關卡 8/8] 檢查排程自動發送 EDM 機制 (Cloud Scheduler API 與排程工作)..."
-echo "💡 費用說明：Cloud Scheduler 每個帳單帳戶每月享有 3 個免費排程（超過每個僅約 NT\$3/月）；"
-echo "            EDM 郵件發送建議串接 Resend（月免 3,000 封）或 Brevo（日免 300 封），單日上限設為 ${EDM_DAILY_SEND_LIMIT} 封。"
+echo "💬 [關卡 8/8] 【🟢 非必要選配項】排程發送客製化 EDM（以人推畫／以畫推人）之 Cloud Scheduler API 檢查與啟用..."
+echo " 📋 【第 8 關條列說明（與「啟用 Vertex AI」並列為非必要選項）】： "
+echo "   • 功能用途：開啟 GCP Cloud Scheduler 定時觸發器，並選配建立 EDM 發信金鑰 (EDM_API_KEY) 與防偽密鑰 (CRON_SECRET)，"
+echo "               供系統在指定時間自動批次執行「以人推畫」或「以畫推人」並寄出客製化 HTML 電子報。"
+echo "   • 為何列為非必要選項："
+echo "     1. 若目前僅由部門同仁於網頁上互動查詢推薦結果，或由人工在畫面上挑好名單後「手動點擊按鈕寄信」，不需開啟背景排程。"
+echo "     2. 若自動發送 EDM 屬於第二階段擴充功能，現階段可直接選 [1] 跳過，完全不影響主系統上線與資安合規。"
+echo "   • 費用影響：Cloud Scheduler 每月前 3 個排程免費 (NT\$0)；搭配 Resend/Brevo 免費層（月免 3,000~9,000 封）亦為 NT\$0。"
 
 SCHEDULER_ENABLED="false"
 if [ "$MODE" = "dry-run" ]; then
-  SCHEDULER_ENABLED="true"
+  SCHEDULER_ENABLED="false"
 else
   if gcloud services list --enabled --project="$PROJECT_ID" --filter="config.name:cloudscheduler.googleapis.com" --format="value(config.name)" 2>/dev/null | grep -q "cloudscheduler.googleapis.com"; then
     SCHEDULER_ENABLED="true"
@@ -486,16 +493,53 @@ else
 fi
 
 if [ "$SCHEDULER_ENABLED" = "true" ]; then
-  echo "✅ [已存在，跳過] Cloud Scheduler 排程服務 API 已啟用，可直接設定「以人推畫 / 以畫推人」EDM 排程！"
+  echo "✅ [已存在，跳過] Cloud Scheduler 排程服務 API (cloudscheduler.googleapis.com) 已啟用！"
   SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
 else
-  echo "⚠️  [尚未啟用] 目前尚未啟用 Cloud Scheduler API (cloudscheduler.googleapis.com)。"
-  if [ "$MODE" = "interactive" ]; then
-    read -r -p "👉 是否現在啟用 Cloud Scheduler 排程服務 API（享有每月 3 個免費排程額度）？[y/N]: " enable_sched
-    if [[ "$enable_sched" =~ ^[Yy]$ ]]; then
-      gcloud services enable cloudscheduler.googleapis.com --project="$PROJECT_ID"
-      echo "✅ 已啟用 Cloud Scheduler API！後續可於 Cloud Run 設定定時或指定時間觸發 /api/cron/send-edm。"
+  echo "ℹ️  目前專案尚未啟用 Cloud Scheduler API（此項為【非必要選配】）。"
+  echo "   請選擇是否要啟用排程自動發送 EDM 相關雲端組件："
+  echo "   [1] 暫不啟用（非必要選項：維持人工手動操作或留待後續階段擴充，直接跳過）"
+  echo "   [2] 選配啟用 Cloud Scheduler API 並檢查/建立 EDM 專屬密鑰 (EDM_API_KEY / CRON_SECRET)"
+  echo ""
+
+  if [ "$MODE" = "interactive" ] || [ "$MODE" = "dry-run" ]; then
+    if [ "$MODE" = "dry-run" ]; then
+      edm_sched_choice="1"
+      echo "👉 [Dry-Run 模擬選擇]: 預設選 [1] 暫不啟用排程自動發送 EDM (跳過)"
+    else
+      read -r -p "👉 請輸入您的選擇 [1-2，預設 1 暫不啟用跳過]: " edm_sched_choice
+      edm_sched_choice="${edm_sched_choice:-1}"
+    fi
+
+    if [ "$edm_sched_choice" = "2" ]; then
+      echo "🔧 正在啟用 Cloud Scheduler API (cloudscheduler.googleapis.com)..."
+      if [ "$MODE" != "dry-run" ]; then
+        gcloud services enable cloudscheduler.googleapis.com --project="$PROJECT_ID"
+      fi
+      echo "✅ 已啟用 Cloud Scheduler API！後續可設定定時觸發 /api/cron/send-edm（單日上限建議鎖定 ${EDM_DAILY_SEND_LIMIT} 封）。"
       FIXED_COUNT=$((FIXED_COUNT + 1))
+
+      for EDM_SEC in "EDM_API_KEY" "CRON_SECRET"; do
+        if [ "$MODE" != "dry-run" ] && gcloud secrets describe "$EDM_SEC" --project="$PROJECT_ID" >/dev/null 2>&1; then
+          echo "✅ [已存在，跳過] Secret Manager 中已存在 EDM 密鑰：${EDM_SEC}"
+          SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
+        elif [ "$MODE" = "interactive" ]; then
+          read -r -p "👉 是否順便於 Secret Manager 建立 ${EDM_SEC}？[y/N]: " create_edm_sec
+          if [[ "$create_edm_sec" =~ ^[Yy]$ ]]; then
+            gcloud services enable secretmanager.googleapis.com --project="$PROJECT_ID"
+            read -r -s -p "請貼上 ${EDM_SEC} 的值（輸入時不顯示明文，按 Enter 結束）: " edm_sec_val
+            echo ""
+            if [ -n "$edm_sec_val" ]; then
+              printf "%s" "$edm_sec_val" | gcloud secrets create "$EDM_SEC" --data-file=- --project="$PROJECT_ID"
+              echo "✅ 已建立 EDM 密鑰 ${EDM_SEC}！"
+              FIXED_COUNT=$((FIXED_COUNT + 1))
+            fi
+          fi
+        fi
+      done
+    else
+      echo "✅ [非必要選配，跳過] 暫不啟用 Cloud Scheduler 自動排程發信。"
+      SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
     fi
   fi
 fi

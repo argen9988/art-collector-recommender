@@ -21,10 +21,10 @@
    ```bash
    bash gcp-setup-and-check.sh
    ```
-3. 腳本一啟動會**先向執行者說明整個 Lazy Pack 要做的 8 大關卡總覽**，接著自動**先檢查現況（已設好的項目自動跳過）**，針對未完成的項目（Secret Manager 金鑰隔離、關閉資料庫公網 IP、開啟每日備份）詢問您是否一鍵套用，並提供：
+3. 腳本一啟動會**先向執行者說明整個 Lazy Pack 要做的 8 大關卡總覽（1～6 為核心必備防線，7～8 為非必要選配項）**，接著自動**先檢查現況（已設好的項目自動跳過）**，針對未完成的項目（Secret Manager 金鑰隔離、關閉資料庫公網 IP、開啟每日備份）詢問您是否一鍵套用，並提供：
    - **Cloud SQL 規格選單（含 NT$300 / NT$500–600 / NT$800+ 等方案）**
-   - **Stage 7：AI 呼叫端點選擇（維持 AI Studio Paid Tier 或一鍵啟用 Vertex AI `aiplatform.googleapis.com` ＋ 綁定 IAM 權限）**
-   - **Stage 8：排程發送客製化 EDM 之 `Cloud Scheduler API` 檢查與啟用**
+   - **Stage 7【🟢 非必要選配 1】：AI 呼叫端點選擇（預設維持 AI Studio Paid Tier 跳過，或選配啟用 Vertex AI `aiplatform.googleapis.com` ＋ 綁定 IAM 權限）**
+   - **Stage 8【🟢 非必要選配 2】：排程發送客製化 EDM 之 `Cloud Scheduler API` 與專屬密鑰檢查與啟用（預設暫不啟用跳過，需要自動背景排程發信時才選配開啟）**
 
 ---
 

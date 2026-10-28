@@ -12,7 +12,7 @@
 - **雲端架構**：Google AI Studio（Build 模式，維持 **Paid Tier 付費層**以保障客戶資料 100% 不用於模型訓練；亦於 Lazy Pack 內建 **Vertex AI** 互動式啟用選項）＋ Google Cloud Run（Next.js 全端容器）＋ Google Cloud SQL（PostgreSQL / MySQL）＋ Cloud Scheduler（排程觸發以人推畫／以畫推人客製化 EDM）＋ 外部發信 API（Resend / Brevo）（決策見 `docs/decisions/2026-10.md` D1、D5）。
 - **身分驗證**：無企業網域，採用 GCP OAuth Consent Screen `Testing` 模式白名單（Test Users Allowlist）搭配後端 `ALLOWED_EMAILS` 核驗，阻絕外部 Gmail 登入；排程路由 `/api/cron/send-edm` 另以 Secret Manager 之 `CRON_SECRET` 驗證（見 D2、D5）。
 - **自動化懶人包（Lazy Pack）**：
-  - 雲端設定與體檢（`lazy-pack/gcp-setup-and-check.sh`）：Bash 腳本，於 GCP Cloud Shell 執行，遵循「開場先向執行者說明全流程」、「先檢查現況、已存在自動跳過」、「Cloud SQL 規格互動討論（含 NT$500–600/月 方案）」、「Stage 7 Vertex AI 互動選配」與「Stage 8 EDM 排程器檢查」（見 D3、D4、D5）。
+  - 雲端設定與體檢（`lazy-pack/gcp-setup-and-check.sh`）：Bash 腳本，於 GCP Cloud Shell 執行，遵循「開場先向執行者說明全流程（區分第 1～6 關核心必備與第 7～8 關非必要選配）」、「先檢查現況、已存在自動跳過」、「Cloud SQL 規格互動討論（含 NT$500–600/月 方案）」以及兩項並列之非必要選配項：「Stage 7 啟用 Vertex AI」與「Stage 8 排程發送客製化 EDM（Cloud Scheduler API ＋ EDM 密鑰）」（見 D3、D4、D5）。
   - 本機程式碼掃描與 AI 紅隊測試（`lazy-pack/code-and-ai-audit.mjs`）：Node.js ESM 腳本，讀取 `config/params.json`，開場先說明檢查項目，執行靜態金鑰掃描（含 `GEMINI_API_KEY`、`EDM_API_KEY`、`CRON_SECRET`）與 LLM-as-a-Judge 推薦品質/防注入/EDM 收件人隱私驗收。
 
 ## 資料夾結構
