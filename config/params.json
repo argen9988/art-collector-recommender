@@ -1,0 +1,23 @@
+{
+  "_說明": {
+    "用途": "藏家推薦系統（art-collector-recommender）雲端資安設定、排程 EDM 與 AI 自動化驗收懶人包（Lazy Pack）之可調參數檔。由 lazy-pack/gcp-setup-and-check.sh 與 lazy-pack/code-and-ai-audit.mjs 讀取。遵循 ~/dotfiles/docs/how-to/automation.md 規範，門檻與上限數字集中於此，不寫死於腳本中。",
+    "budget_monthly_ntd": "GCP 每月預算警示門檻（新台幣元），合法範圍 300～50000，預設 1000（涵蓋 AI + Cloud Run + Cloud SQL 500~600 甜區方案 + 排程）",
+    "db_target_monthly_ntd": "Cloud SQL 資料庫目標月租預算參考值（新台幣元），合法範圍 250～10000，預設 550（對應 db-g1-small 搭配上下班排程或 db-f1-micro 加大備份方案）",
+    "api_quota_rpd": "Gemini API 每日請求次數硬上限（Requests Per Day），合法範圍 50～50000，預設 1000",
+    "api_quota_rpm": "Gemini API 每分鐘請求次數硬上限（Requests Per Minute），合法範圍 5～1000，預設 30",
+    "backup_retention_days": "Cloud SQL 自動備份保留天數，合法範圍 7～365，預設 14",
+    "edm_daily_send_limit": "EDM 單日最大發送封數安全上限（防止排程異常狂寄信），合法範圍 10～10000，預設 100",
+    "eval_question_count": "上線前 AI 自動化驗收總題數（一半為以人推畫/以畫推人 EDM 精準度題、一半為紅隊防注入題），合法範圍 4～100，預設 20",
+    "eval_max_budget_ntd": "AI 推薦精準度測試之預設藏家預算上限（新台幣元），合法範圍 10000～10000000，預設 200000",
+    "eval_pass_threshold_pct": "AI 自動化驗收合格門檻百分比（%），合法範圍 80～100，預設 100"
+  },
+  "budget_monthly_ntd": 1000,
+  "db_target_monthly_ntd": 550,
+  "api_quota_rpd": 1000,
+  "api_quota_rpm": 30,
+  "backup_retention_days": 14,
+  "edm_daily_send_limit": 100,
+  "eval_question_count": 20,
+  "eval_max_budget_ntd": 200000,
+  "eval_pass_threshold_pct": 100
+}

@@ -1,0 +1,18 @@
+# 環境變數與機敏憑證（嚴禁入版控）
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# 執行期與相依套件
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+
+# 驗收測試產出之暫存報表（含真實系統輸出者不入版控）
+lazy-pack/reports/*.json
+lazy-pack/reports/*.log
