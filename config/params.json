@@ -1,7 +1,7 @@
 {
   "_說明": {
     "用途": "藏家推薦系統（art-collector-recommender）雲端資安設定、排程 EDM 與 AI 自動化驗收懶人包（Lazy Pack）之可調參數檔。由 lazy-pack/gcp-setup-and-check.sh 與 lazy-pack/code-and-ai-audit.mjs 讀取。遵循 ~/dotfiles/docs/how-to/automation.md 規範，門檻與上限數字集中於此，不寫死於腳本中。",
-    "budget_monthly_ntd": "GCP 每月預算警示門檻（新台幣元），合法範圍 300～50000，預設 1000（涵蓋 AI + Cloud Run + Cloud SQL 500~600 甜區方案 + 排程）",
+    "budget_monthly_ntd": "GCP 每月預算警示門檻（新台幣元），合法範圍 300～50000，預設 1000（涵蓋 AI + Cloud Run + Cloud SQL 480~560 甜區方案 + 排程）",
     "db_target_monthly_ntd": "Cloud SQL 資料庫目標月租預算參考值（新台幣元），合法範圍 250～10000，預設 550（對應 db-g1-small 搭配上下班排程或 db-f1-micro 加大備份方案）",
     "api_quota_rpd": "Gemini API 每日請求次數硬上限（Requests Per Day），合法範圍 50～50000，預設 1000",
     "api_quota_rpm": "Gemini API 每分鐘請求次數硬上限（Requests Per Minute），合法範圍 5～1000，預設 30",

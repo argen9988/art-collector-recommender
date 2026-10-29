@@ -10,10 +10,12 @@ ST="$R/reports/.lazy-pack-state.env"
 FIX="$T/fixtures/fake-nextjs-app"
 mkdir -p "$R/reports"
 [ -f "$ST" ] && cp "$ST" "$S/state.bak"
+touch "$S/start.marker"
 # 中途被中斷（Ctrl-C）也要還原使用者的狀態檔、關掉假伺服器、清暫存
 cleanup() {
-  [ -n "${SRV:-}" ] && kill "$SRV" 2>/dev/null
+  [ -n "${SRV:-}" ] && { kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; }
   if [ -f "$S/state.bak" ]; then cp "$S/state.bak" "$ST"; else rm -f "$ST"; fi
+  find "$R/reports" -maxdepth 1 -name 'stage-*-report-*.md' -newer "$S/start.marker" -delete 2>/dev/null
   rm -rf "${S:?}"
 }
 trap cleanup EXIT
@@ -246,23 +248,47 @@ if [ -s "$S/port" ]; then
   cnt_is t8i3 "$(wc -l < "$LOG" | tr -d ' ')" 0
   # --mock 搭配缺值的 --url 不該 exit 2
   run --eval-only --mock --url; rc_is t8i4 $? 0
+  chk t8i4 "測試對象：本機模擬回應"
+  nochk t8i4 "後面要接網址"
   # 網址的帳密、查詢字串不能進畫面與報告；非本機 http 搭配 token 要擋；--api-path 不能是完整網址
   rm -f "$ST"
-  run --eval-only --url "http://user:pw@127.0.0.1:1"; rc_is t8j $? 2
-  chk t8j "不要放帳號密碼"
-  nochk t8j "user:pw"
   run --eval-only --url "$B/good?key=SECRETKEY#frag"; rc_is t8j2 $? 0
   nochk t8j2 "SECRETKEY"
-  LAZY_PACK_API_TOKEN="$FAKE_API_TOKEN" run --eval-only --url "http://art-web.example.invalid"; rc_is t8j3 $? 2
-  chk t8j3 "會以明碼送出"
-  run --eval-only --url "$B/custom" --api-path "http://evil.example/x"; rc_is t8j4 $? 2
-  chk t8j4 "--api-path 只能是路徑"
-  run --eval-only --url "$B/custom" --api-path "v2/rec?x=1"; rc_is t8j5 $? 2
+  LATEST="$(find "$R/reports" -maxdepth 1 -name 'stage-3-report-*.md' -newer "$S/start.marker" | sort | tail -1)"
+  if [ -n "$LATEST" ] && ! grep -q "SECRETKEY" "$LATEST" && ! grep -q "SECRETKEY" "$R/reports/full-execution-report.md"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL [t8j2] 報告檔缺少或含查詢字串"; fi
   rm -f "$ST"
 else
   skip=$((skip+1)); echo "SKIP [t8] 假推薦 API 起不來"
 fi
 kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; SRV=
+
+# 8j. 網址帳密、非本機 http 搭配 token、--api-path 防呆（都在連線前就擋下，不需要假伺服器）
+rm -f "$ST"
+run --eval-only --url "http://user:pw@127.0.0.1:1"; rc_is t8j $? 2
+chk t8j "不要放帳號密碼"
+nochk t8j "user:pw"
+LAZY_PACK_API_TOKEN="$FAKE_API_TOKEN" run --eval-only --url "http://art-web.example.invalid"; rc_is t8j3 $? 2
+chk t8j3 "會以明碼送出"
+run --eval-only --url "http://127.0.0.1:1" --api-path "http://evil.example/x"; rc_is t8j4 $? 2
+chk t8j4 "--api-path 只能是路徑"
+nochk t8j4 "evil.example/x?"
+run --eval-only --url "http://127.0.0.1:1" --api-path "v2/rec?x=1"; rc_is t8j5 $? 2
+chk t8j5 "--api-path 只能是路徑"
+nochk t8j5 "x=1"
+rm -f "$ST"
+
+# 8k. 不認得的選項、--target／--source／--repo 缺值 → 結束碼 2
+for args in "--bogus" "--target" "--target --scan-only" "--source" "--repo" "--repo --source github"; do
+  run $args < /dev/null; rc_is "t8k[$args]" $? 2
+done
+run --bogus < /dev/null
+chk t8k "不認得的選項"
+# 8l. --repo 網址帶帳密或特殊字元 → 擋下，不跑 git，畫面不出現帳密
+run --repo "https://user:pw@github.com/x/y" < /dev/null; rc_is t8l $? 2
+chk t8l "不要放帳號密碼"
+nochk t8l "user:pw"
+run --repo "https://github.com/x/y&calc" < /dev/null; rc_is t8l2 $? 2
+chk t8l2 "網址含特殊字元"
 
 # 9. --url 防呆：沒給值、不是網址、ftp、連不上（不重試每一題）、非 https 的外部網址要警告
 run --eval-only --url; rc_is t9 $? 2
@@ -281,4 +307,4 @@ run --eval-only --api-path; rc_is t9f $? 2
 chk t9f "--api-path 後面要接路徑"
 
 echo "PASS=$pass FAIL=$fail SKIP=$skip"
-[ "$fail" -eq 0 ]
+[ "$fail" -eq 0 ] && [ "$skip" -eq 0 ]

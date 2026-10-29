@@ -831,6 +831,23 @@ async function resolveTarget(cliArgs) {
 // 主程式入口（一開始先說明互動方式與本階段工作項目）
 // -----------------------------------------------------------------------------
 const args = process.argv.slice(2);
+{
+  // 不認得的選項、--target／--source／--repo 缺值：直接結束碼 2（--url／--api-path 缺值由 3-2 自己判斷，帶 --mock 時可略過）
+  const FLAGS = new Set(['--self-test', '--scan-only', '--eval-only', '--run-ai-eval', '--mock', '--target', '--source', '--repo', '--url', '--api-path']);
+  const NEED_VALUE = ['--target', '--source', '--repo'];
+  const bad = args.find((a) => a.startsWith('--') && !FLAGS.has(a));
+  if (bad) {
+    console.log(`❌ 不認得的選項：${bad}。可用：${[...FLAGS].join(' ')}`);
+    process.exit(2);
+  }
+  for (const f of NEED_VALUE) {
+    const i = args.indexOf(f);
+    if (i !== -1 && (!args[i + 1] || args[i + 1].startsWith('--'))) {
+      console.log(`❌ ${f} 後面要接值（例如 ${f} ${f === '--source' ? 'cloud|github|local' : f === '--repo' ? '"https://github.com/公司帳號/art-collector-web"' : '"<原始碼資料夾>"'}）。`);
+      process.exit(2);
+    }
+  }
+}
 const isSelfTest = args.includes('--self-test');
 const scanOnly = args.includes('--scan-only');
 const evalOnly = args.includes('--eval-only');

@@ -81,7 +81,7 @@ Lazy Pack 內建自動費用精算器（可隨時執行 `bash lazy-pack/gcp-setu
 | **5. Google OAuth 2.0** | 同仁 Gmail 白名單 | Google Identity 基礎登入與 Testing 白名單攔截永久免費 | **NT$0** | **NT$0** |
 | **6. Vertex AI API** | 🟢 選配企業 AI 平台 | 預設不開啟為 NT$0；若開啟無基本月租，按呼叫量計費 | **NT$0** | 依實際呼叫量 |
 | **7. 排程自動發送 EDM** | 🟢 選配定時器+發信 | Cloud Scheduler 前 3 個排程免費 (NT$0) ＋ Resend/Brevo 免費層 (月免 3,000～9,000 封) | **NT$0** | 免費層內 **NT$0**<br>*(專業版約 NT$650)* |
-| **📊 每月預估總花費合計** | **整套系統總帳單** | **自動加總並與「每月預算提醒鈴（預設 NT$1,000）」比對** | **約 NT$495～620 / 月**<br>*(以推薦方案 3A 為例)* | **約 NT$570～860 / 月**<br>*(低於 NT$1,000 預算上限 ✅)* |
+| **📊 每月預估總花費合計** | **整套系統總帳單** | **自動加總並與「每月預算提醒鈴（預設 NT$1,000）」比對** | **約 NT$495～620 / 月**<br>*(以推薦方案 3A 為例)* | **約 NT$570～910 / 月**<br>*(低於 NT$1,000 預算上限 ✅)* |
 
 ### 2. Cloud SQL 資料庫 6 種月租方案對照表
 
@@ -116,6 +116,8 @@ bash lazy-pack/gcp-setup-and-check.sh --stage 1      # 只跑第一階段（立�
 bash lazy-pack/gcp-setup-and-check.sh --stage 2      # 只跑第二階段（系統架構加固與規格選型）
 bash lazy-pack/gcp-setup-and-check.sh --stage cost   # 只跑雲端服務開啟清單與每月費用精算表
 bash lazy-pack/gcp-setup-and-check.sh --item 3       # 只挑單一細項（例如第 3 項預算與配額問答）執行
+# --item 編號對照：1 Paid Tier 計費綁定、2 雙 Owner 共管、3 預算／API 上限／Gmail 白名單、4 Secret Manager 金鑰隔離、
+#                 5 Cloud SQL 網路防護、6 Cloud SQL 規格月租選單、7 Vertex AI 選配、8 排程 EDM 選配（第三階段沒有 --item，用下面的 --scan-only／--eval-only）
 bash lazy-pack/gcp-setup-and-check.sh --check-only   # 純唯讀體檢模式（只檢查與出報告，不修改設定）
 bash lazy-pack/gcp-setup-and-check.sh --project <Project ID>   # 直接指定 GCP 專案（不帶時會列出帳號下所有專案讓您選）
 
