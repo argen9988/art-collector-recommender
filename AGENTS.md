@@ -65,7 +65,7 @@ art-collector-recommender/
 - Windows PowerShell 傳雙引號字串給 `python -c` 時，反ticks（`` ` ``）會被 PowerShell 當作跳脫字元吃掉；跨工具批量替換文字應寫成獨立 `.py` 腳本執行。
 - Google Cloud SQL 官方 24 小時機型直接從 `db-f1-micro`（約 NT$300/月）跳至 `db-g1-small`（約 NT$800/月），若預算落在 NT$500–600/月，需透過「`db-g1-small` ＋ Cloud Scheduler 平日上下班自動開關機」或「`db-f1-micro` ＋ 50GB SSD ＋ 30 天 PITR 備份」達成。
 
-- Git Bash 會把 `/v2/rec` 這類以斜線開頭的參數改成 `C:/Program Files/Git/v2/rec`：`--api-path` 寫成 `v2/rec`（腳本會擋下被改過的值），測試要原樣傳時前面加 `MSYS_NO_PATHCONV=1`。
+- Git Bash 會把 `/v2/rec` 這類以斜線開頭的參數改成 `C:/Program Files/Git/v2/rec`：`--api-path` 寫成 `v2/rec`（腳本會擋下被改過的值），測試要原樣傳時前面加 `MSYS_NO_PATHCONV=1`（加了之後受測腳本自己的路徑也不轉，要給 `cygpath -m` 轉出的 `D:/…` 寫法）。
 - Windows 上 node 叫 `gcloud`、`git` 要經 cmd.exe（真的是 `.cmd`），所以 `code-and-ai-audit.mjs` 的 `runCmd` 在 Windows 用 `shell: true`、參數加雙引號；假 gcloud 因此另放 `tests/fakebin/gcloud.cmd` 轉給 bash。給 node 的路徑在測試裡一律用 `cygpath -m` 轉成 `D:/…`。
 
 ## 安全與備份
@@ -76,4 +76,4 @@ art-collector-recommender/
 ## 改動後的驗證方式
 
 1. 修改 `lazy-pack/gcp-setup-and-check.sh` 後，用 Git Bash 的 `C:\Program Files\Git\bin\bash.exe -n lazy-pack/gcp-setup-and-check.sh` 驗證語法無誤，跑 `bash tests/test-gcp-setup.sh`（PATH 前面放假 gcloud，走真實分支、不連雲端；現在 25 項），並用 `--dry-run` 模式測試 `--stage 1`、`--stage 2`、`--stage cost` 與報告輸出。`--dry-run` 碰到 gcloud 的地方都換成寫死的假值，只驗得到選單與報告，不能取代前者。
-2. 修改 `lazy-pack/code-and-ai-audit.mjs` 或 `config/params.json` 後，執行 `node lazy-pack/code-and-ai-audit.mjs --self-test` 確認參數讀取、靜態掃描（掃 `tests/fixtures/fake-nextjs-app`）、模擬閱卷與報告輸出皆通過，再跑 `bash tests/test-code-audit.sh`（假 gcloud、本機假 git repo、假 ZIP 與假推薦 API 小伺服器，不連雲端；現在 146 項，約 2 分鐘（估））。
+2. 修改 `lazy-pack/code-and-ai-audit.mjs` 或 `config/params.json` 後，執行 `node lazy-pack/code-and-ai-audit.mjs --self-test` 確認參數讀取、靜態掃描（掃 `tests/fixtures/fake-nextjs-app`）、模擬閱卷與報告輸出皆通過，再跑 `bash tests/test-code-audit.sh`（假 gcloud、本機假 git repo、假 ZIP 與假推薦 API 小伺服器，不連雲端；現在 166 項，約 2 分鐘（估））。手動跑 `--eval-only`、`--run-ai-eval` 前，先把 `reports/.lazy-pack-state.env` 備份並移開（裡面第一階段記下的真網址會被當成測試對象），或加 `--mock`；`tests/test-code-audit.sh` 自己會備份、移開，結束或被中斷時還原。

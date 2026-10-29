@@ -7,7 +7,8 @@
 ## 零、 Lazy Pack 工具包補強與審閱待辦（下次開工優先執行）
 
 - [ ] **【工具補強】新增「自動定位藏家推薦系統目標（雲端專案選單＋原始碼三來源自動抓取＋線上網址實測）」**（2026-10-29 確認）：
-  4. **同步文件**：`AGENT_SETUP_雲端資安設定與驗收指南.md`、`README.md` 補 `--project`、專案選單、`--url`（含 `--api-path`、`--mock`、`LAZY_PACK_API_TOKEN`，以及「線上端點格式是假設，要問開發者真實路徑」）與三種原始碼來源的說明（`AGENT_SETUP` 第 74、198 行與 `README.md` 第 122 行的指令要改成可不帶 `--target`、說明選單與 `--source`／`--repo`）。（第 1～3 點已完成，見施工紀錄 2026-10-29 段 A、B1、B2）
+  - 剩下的一項（原第 4 點）**同步文件**：`AGENT_SETUP_雲端資安設定與驗收指南.md`、`README.md` 補 `--project`、專案選單、`--url`（含 `--api-path`、`--mock`、`LAZY_PACK_API_TOKEN`，以及「線上端點格式是假設，要問開發者真實路徑」）與三種原始碼來源的說明（`AGENT_SETUP` 第 74、198 行與 `README.md` 第 122 行的指令要改成可不帶 `--target`、說明選單與 `--source`／`--repo`）。（原第 1～3 點已完成，見施工紀錄 2026-10-29 段 A、B1、B2）
+- [ ] **【小補強】`--url` 線上測試遇到 429／5xx 的處理**（段 B2 審閱提出，2026-10-29 暫緩）：目前會連續打完剩下的題目，全部逾時最壞約 10 分鐘（20 題乘 30 秒）。真實端點格式確認後，再加「讀 `Retry-After` 退避」與「連續幾題逾時或 5xx 就中止」。另外 `tests/test-code-audit.sh` 用 `ls -t … | head -1` 取最新報告，兩次執行時間戳相同時可能抓到舊的，改成跑前記清單、跑後取差集。
 - [ ] **【待確認】真實推薦端點的路徑與格式**：段 B2 的 `--url` 測試假設 `POST /api/recommend`、送 JSON（含虛構庫存 `inventory`）、回 `{ recommendations, cc_list, blocked, message }`。真實系統（AI Studio Build 產生的 Next.js）的推薦端點路徑、要不要登入、回傳格式都未知；拋棄式專案驗收或拿到原始碼時查清楚，不同就調 `askOnline` 或用 `--api-path`。
 - [ ] **【真雲端驗收】用拋棄式 GCP 專案跑一輪（見 D7 第 ③ 層）**：上面三項與審閱都做完後，使用者用個人帳號建一個新 GCP 專案（不放公司資料）、部署 hello-world Cloud Run，照 `AGENT_SETUP` 從第一階段跑到第三階段，跑完關閉專案（估 NT$0～50）。
 - [ ] **【收尾審閱】執行 `review-changes` 審閱**：待上述自動定位機制實作完成後，一併對 `2643155..HEAD` 執行 `review-changes` 完整審閱。

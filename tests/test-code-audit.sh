@@ -10,6 +10,14 @@ ST="$R/reports/.lazy-pack-state.env"
 FIX="$T/fixtures/fake-nextjs-app"
 mkdir -p "$R/reports"
 [ -f "$ST" ] && cp "$ST" "$S/state.bak"
+# 中途被中斷（Ctrl-C）也要還原使用者的狀態檔、關掉假伺服器、清暫存
+cleanup() {
+  [ -n "${SRV:-}" ] && kill "$SRV" 2>/dev/null
+  if [ -f "$S/state.bak" ]; then cp "$S/state.bak" "$ST"; else rm -f "$ST"; fi
+  rm -rf "${S:?}"
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM
 rm -f "$ST"   # 使用者狀態檔裡的真網址不能讓 3-2 測試打出去
 unset LAZY_PACK_API_TOKEN
 chmod +x "$S/fakebin/gcloud"
@@ -217,20 +225,44 @@ if [ -s "$S/port" ]; then
 
   # 沒帶 --url → 讀第一階段記下的網址；--mock、--self-test 不打網站；狀態檔其他欄位要保留
   printf 'SAVED_PROJECT_ID="proj-a"\nSAVED_CLOUD_RUN_URL="%s/good"\n' "$B" > "$ST"
-  : > "$LOG"; run --eval-only; rc_is t8i $? 0
+  : > "$LOG"; printf 'y\n' | run --eval-only; rc_is t8i $? 0
+  chk t8i "要拿第一階段記下的網站"
   chk t8i "網址來源：第一階段記下的網址"
   cnt_is t8i "$(nlog good)" 20
   grep -qF "SAVED_CLOUD_RUN_URL=\"$B/good\"" "$ST" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t8i] 狀態檔弄丟了 SAVED_CLOUD_RUN_URL"; }
+  # 沒回答 y（非互動讀不到輸入、回 n）→ 改跑本機模擬，不打網站
+  : > "$LOG"; run --eval-only < /dev/null; rc_is t8i1 $? 0
+  chk t8i1 "要拿第一階段記下的網站"
+  chk t8i1 "測試對象：本機模擬回應"
+  cnt_is t8i1 "$(wc -l < "$LOG" | tr -d ' ')" 0
+  printf 'n\n' | run --eval-only; rc_is t8i1b $? 0
+  chk t8i1b "測試對象：本機模擬回應"
+  cnt_is t8i1b "$(wc -l < "$LOG" | tr -d ' ')" 0
   : > "$LOG"; run --eval-only --mock; rc_is t8i2 $? 0
   chk t8i2 "測試對象：本機模擬回應"
+  cnt_is t8i2 "$(wc -l < "$LOG" | tr -d ' ')" 0
   run --self-test; rc_is t8i3 $? 0
   chk t8i3 "測試對象：本機模擬回應"
-  cnt_is t8i2 "$(wc -l < "$LOG" | tr -d ' ')" 0
+  cnt_is t8i3 "$(wc -l < "$LOG" | tr -d ' ')" 0
+  # --mock 搭配缺值的 --url 不該 exit 2
+  run --eval-only --mock --url; rc_is t8i4 $? 0
+  # 網址的帳密、查詢字串不能進畫面與報告；非本機 http 搭配 token 要擋；--api-path 不能是完整網址
+  rm -f "$ST"
+  run --eval-only --url "http://user:pw@127.0.0.1:1"; rc_is t8j $? 2
+  chk t8j "不要放帳號密碼"
+  nochk t8j "user:pw"
+  run --eval-only --url "$B/good?key=SECRETKEY#frag"; rc_is t8j2 $? 0
+  nochk t8j2 "SECRETKEY"
+  LAZY_PACK_API_TOKEN="$FAKE_API_TOKEN" run --eval-only --url "http://art-web.example.invalid"; rc_is t8j3 $? 2
+  chk t8j3 "會以明碼送出"
+  run --eval-only --url "$B/custom" --api-path "http://evil.example/x"; rc_is t8j4 $? 2
+  chk t8j4 "--api-path 只能是路徑"
+  run --eval-only --url "$B/custom" --api-path "v2/rec?x=1"; rc_is t8j5 $? 2
   rm -f "$ST"
 else
   skip=$((skip+1)); echo "SKIP [t8] 假推薦 API 起不來"
 fi
-kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
+kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; SRV=
 
 # 9. --url 防呆：沒給值、不是網址、ftp、連不上（不重試每一題）、非 https 的外部網址要警告
 run --eval-only --url; rc_is t9 $? 2
@@ -248,7 +280,5 @@ chk t9e "這個網址不是 https"
 run --eval-only --api-path; rc_is t9f $? 2
 chk t9f "--api-path 後面要接路徑"
 
-if [ -f "$S/state.bak" ]; then cp "$S/state.bak" "$ST"; else rm -f "$ST"; fi
-rm -rf "${S:?}"
 echo "PASS=$pass FAIL=$fail SKIP=$skip"
 [ "$fail" -eq 0 ]
