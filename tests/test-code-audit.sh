@@ -10,6 +10,8 @@ ST="$R/reports/.lazy-pack-state.env"
 FIX="$T/fixtures/fake-nextjs-app"
 mkdir -p "$R/reports"
 [ -f "$ST" ] && cp "$ST" "$S/state.bak"
+rm -f "$ST"   # 使用者狀態檔裡的真網址不能讓 3-2 測試打出去
+unset LAZY_PACK_API_TOKEN
 chmod +x "$S/fakebin/gcloud"
 export PATH="$S/fakebin:$PATH"
 # 給 node 與它叫起來的程式的路徑一律用 D:/… 寫法（Windows）；別的系統原樣
@@ -69,10 +71,13 @@ mkdir -p "$S/nopkg"; printf 'export const a = 1;\n' > "$S/nopkg/a.ts"; printf '.
 run --target "$(mp "$S/nopkg")" --scan-only; rc_is t3g $? 0
 chk t3g "看起來不像 Next.js 專案"
 
-# 4. --eval-only 不需原始碼、不出選單
+# 4. --eval-only 不需原始碼、不出選單；沒有網址 → 本機模擬
 run --eval-only < /dev/null; rc_is t4 $? 0
 nochk t4 "原始碼在哪裡"
 chk t4 "完成 20 題自動化測試"
+chk t4 "測試對象：本機模擬回應"
+LATEST="$(ls -t "$R"/reports/stage-3-report-*.md | head -1)"
+grep -q "3-2 測試對象\*\*：本機模擬回應" "$LATEST" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t4] 單次報告沒寫 3-2 測試對象"; }
 
 # 5. 沒帶 --target → 選單 [C] 搜尋本機：資料夾（舊）＋ ZIP（新，解開後多一層資料夾）
 mkdir -p "$S/search/projects"; cp -r "$FIX" "$S/search/projects/art-web"
@@ -137,6 +142,111 @@ run --source cloud < /dev/null; rc_is t7c $? 2
 chk t7c "還不知道是哪個 GCP 專案"
 run --source ftp < /dev/null; rc_is t7d $? 2
 chk t7d "--source 只能是"
+
+# 8. 細項 3-2 打線上網址（--url）：假推薦 API 小伺服器，網址第一段決定它怎麼回（見 tests/fake-recommend-api.mjs）
+LOG="$S/api.log"; : > "$LOG"
+export FAKE_API_TOKEN="fake-$$-$RANDOM"   # 假登入憑證跑的時候才組出來，不寫進檔案
+node "$(mp "$T/fake-recommend-api.mjs")" "$(mp "$S/port")" "$(mp "$LOG")" & SRV=$!
+for _ in $(seq 1 50); do [ -s "$S/port" ] && break; sleep 0.2; done
+if [ -s "$S/port" ]; then
+  B="http://127.0.0.1:$(cat "$S/port")"
+  nlog() { grep -c "\"mode\":\"$1\"" "$LOG"; }
+  cnt_is() { if [ "$2" = "$3" ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL [$1] 送出 $2 題（預期 $3）"; fi; }
+
+  run --eval-only --url "$B/good"; rc_is t8 $? 0
+  chk t8 "測試對象：$B/good/api/recommend（網址來源：--url）"
+  chk t8 "通過 20/20 題"
+  cnt_is t8 "$(nlog good)" 20
+  cnt_is t8 "$(grep '"mode":"good"' "$LOG" | grep -c '"dummy_data":true')" 20
+  grep -q '"test_id":"ACC-01".*"max_budget_ntd":150000' "$LOG" && grep -q '"test_id":"INJ-01".*"inventory":\[{"id":"ART-001"' "$LOG" \
+    && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t8] 送出的題目內容不對"; }
+  LATEST="$(ls -t "$R"/reports/stage-3-report-*.md | head -1)"
+  grep -q "3-2 測試對象\*\*：線上網站 $B/good/api/recommend" "$LATEST" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t8] 單次報告沒寫線上網址"; }
+
+  run --eval-only --url "$B/leaky"; rc_is t8b $? 1
+  chk t8b "通過 0/20 題"
+  chk t8b "\[ACC-01\] 失敗：預算超標：畫作 ART-001"
+  chk t8b "\[INJ-02\] 失敗：防注入失敗"
+  chk t8b "第三階段總體檢結果：FAIL"
+
+  run --eval-only --url "$B/partial"; rc_is t8c $? 1
+  chk t8c "通過 18/20 題"
+  chk t8c "\[ACC-03\] 失敗：EDM 隱私違規"
+  chk t8c "\[INJ-04\] 失敗：未明確攔截"
+  nochk t8c "\[ACC-01\] 失敗"
+  nochk t8c "\[INJ-05\] 失敗"
+
+  run --eval-only --url "$B/ghost"; rc_is t8d $? 1
+  chk t8d "發生幻覺：推薦了不存在於庫存的畫作 ID (ART-999)"
+  chk t8d "通過 10/20 題"
+  run --eval-only --url "$B/liar"; rc_is t8d2 $? 1
+  chk t8d2 "\[ACC-02\] 失敗：預算超標：畫作 ART-004 價格 (450000)"
+  run --eval-only --url "$B/empty"; rc_is t8d3 $? 1
+  chk t8d3 "\[ACC-01\] 失敗：一幅畫都沒推薦"
+  nochk t8d3 "\[INJ-01\] 失敗"
+
+  run --eval-only --url "$B/text"; rc_is t8e $? 1
+  chk t8e "\[ACC-01\] 失敗：回應沒有 recommendations 清單"
+  nochk t8e "\[INJ-01\] 失敗"
+  chk t8e "通過 10/20 題"
+
+  run --eval-only --url "$B/auth"; rc_is t8f $? 1
+  chk t8f "網站要求登入（HTTP 401）"
+  chk t8f "\[INJ-10\] 未測"
+  cnt_is t8f "$(nlog auth)" 1
+  LAZY_PACK_API_TOKEN="$FAKE_API_TOKEN" run --eval-only --url "$B/auth"; rc_is t8f2 $? 0
+  chk t8f2 "通過 20/20 題"
+  cnt_is t8f2 "$(grep -cF "Bearer $FAKE_API_TOKEN" "$LOG")" 20
+
+  run --eval-only --url "$B/custom"; rc_is t8g $? 1
+  chk t8g "沒有推薦端點（HTTP 404）"
+  chk t8g "\[INJ-10\] 未測"
+  run --eval-only --url "$B/custom/" --api-path v2/rec; rc_is t8g2 $? 0
+  chk t8g2 "測試對象：$B/custom/v2/rec"
+  chk t8g2 "通過 20/20 題"
+  # 關掉 Git Bash 的路徑轉換時，受測腳本的路徑也不轉，所以要給 D:/… 寫法
+  MSYS_NO_PATHCONV=1 node "$(mp "$MJS")" --eval-only --url "$B/custom" --api-path /v2/rec > "$S/out.txt" 2>&1; rc_is t8g3 $? 0
+  chk t8g3 "通過 20/20 題"
+  run --eval-only --url "$B/custom" --api-path "C:/Program Files/Git/v2/rec"; rc_is t8g4 $? 2
+  chk t8g4 "被 Git Bash 改成 Windows 路徑"
+
+  : > "$LOG"; run --eval-only --url "$B/boom"; rc_is t8h $? 1
+  chk t8h "\[INJ-10\] 失敗：網站回 HTTP 500"
+  nochk t8h "未測"
+  cnt_is t8h "$(nlog boom)" 20
+
+  # 沒帶 --url → 讀第一階段記下的網址；--mock、--self-test 不打網站；狀態檔其他欄位要保留
+  printf 'SAVED_PROJECT_ID="proj-a"\nSAVED_CLOUD_RUN_URL="%s/good"\n' "$B" > "$ST"
+  : > "$LOG"; run --eval-only; rc_is t8i $? 0
+  chk t8i "網址來源：第一階段記下的網址"
+  cnt_is t8i "$(nlog good)" 20
+  grep -qF "SAVED_CLOUD_RUN_URL=\"$B/good\"" "$ST" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t8i] 狀態檔弄丟了 SAVED_CLOUD_RUN_URL"; }
+  : > "$LOG"; run --eval-only --mock; rc_is t8i2 $? 0
+  chk t8i2 "測試對象：本機模擬回應"
+  run --self-test; rc_is t8i3 $? 0
+  chk t8i3 "測試對象：本機模擬回應"
+  cnt_is t8i2 "$(wc -l < "$LOG" | tr -d ' ')" 0
+  rm -f "$ST"
+else
+  skip=$((skip+1)); echo "SKIP [t8] 假推薦 API 起不來"
+fi
+kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
+
+# 9. --url 防呆：沒給值、不是網址、ftp、連不上（不重試每一題）、非 https 的外部網址要警告
+run --eval-only --url; rc_is t9 $? 2
+chk t9 "--url 後面要接網址"
+run --eval-only --url "not a url"; rc_is t9b $? 2
+chk t9b "看不懂這個網址「not a url」"
+run --eval-only --url "ftp://example.invalid"; rc_is t9c $? 2
+chk t9c "要是 https:// 開頭"
+run --eval-only --url "http://127.0.0.1:1"; rc_is t9d $? 1
+chk t9d "連不上 http://127.0.0.1:1/api/recommend"
+chk t9d "\[INJ-10\] 未測"
+nochk t9d "不是 https"
+run --eval-only --url "http://art-web.example.invalid"; rc_is t9e $? 1
+chk t9e "這個網址不是 https"
+run --eval-only --api-path; rc_is t9f $? 2
+chk t9f "--api-path 後面要接路徑"
 
 if [ -f "$S/state.bak" ]; then cp "$S/state.bak" "$ST"; else rm -f "$ST"; fi
 rm -rf "${S:?}"
