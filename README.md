@@ -117,10 +117,21 @@ bash lazy-pack/gcp-setup-and-check.sh --stage 2      # 只跑第二階段（系�
 bash lazy-pack/gcp-setup-and-check.sh --stage cost   # 只跑雲端服務開啟清單與每月費用精算表
 bash lazy-pack/gcp-setup-and-check.sh --item 3       # 只挑單一細項（例如第 3 項預算與配額問答）執行
 bash lazy-pack/gcp-setup-and-check.sh --check-only   # 純唯讀體檢模式（只檢查與出報告，不修改設定）
+bash lazy-pack/gcp-setup-and-check.sh --project <Project ID>   # 直接指定 GCP 專案（不帶時會列出帳號下所有專案讓您選）
 
 # 於本機執行第三階段（原始碼金鑰掃描 ＋ 20 題 AI 推薦與防套話紅隊測試）：
-node lazy-pack/code-and-ai-audit.mjs --target "<藏家系統原始碼路徑>" --run-ai-eval
+node lazy-pack/code-and-ai-audit.mjs --run-ai-eval                       # 不帶 --target：出「原始碼在哪裡」選單
+node lazy-pack/code-and-ai-audit.mjs --source github --repo "<GitHub 網址>" --run-ai-eval   # 跳過選單，直接指定來源（cloud／github／local）
+node lazy-pack/code-and-ai-audit.mjs --target "<藏家系統原始碼路徑>" --run-ai-eval         # 已知資料夾時
+node lazy-pack/code-and-ai-audit.mjs --eval-only --url "<Cloud Run 網址>"                  # 20 題直接打真實線上網站（只考題、不掃原始碼）
 ```
+
+**補充說明：**
+
+- **專案選單**：第一、二階段不帶 `--project` 時，腳本會列出這個 Google 帳號下的所有 GCP 專案讓您選，並順便找出藏家推薦系統的 Cloud Run 網址記在 `reports/.lazy-pack-state.env`。
+- **原始碼三種來源**（第三階段不帶 `--target` 時的選單）：`[A]` 雲端（Cloud Build 上傳的原始碼，找不到會引導從 Google AI Studio 下載）、`[B]` GitHub 網址 clone、`[C]` 搜尋本機「下載」與「桌面」的資料夾與 ZIP。抓下來的放 `reports/sources/`。`--target` 不能指到 Lazy Pack 自己。
+- **20 題測試打哪裡**：依序是 `--url` → 第一階段記下的網址 → 本機模擬回應（`--mock` 可強制模擬）。用記下的網址前會先問 y/N，不能互動時一律模擬。網站要登入時，把 token 放環境變數 `LAZY_PACK_API_TOKEN`。
+- **⚠️ 線上端點格式是假設的**：預設 `POST /api/recommend`、回 `{ recommendations, cc_list, blocked, message }`。真實系統的路徑與格式請先問開發者；路徑不同用 `--api-path <路徑>`（Git Bash 裡寫 `v2/rec`，不加開頭斜線）。
 
 ---
 
