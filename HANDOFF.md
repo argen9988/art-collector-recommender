@@ -26,7 +26,7 @@
 - 段 C 三件（見下一步）
 - 真實推薦端點的路徑與格式待確認（`D:\Dev\company\art-collector-recommender\docs\todo-plan.md`「【待確認】」）
 - 429／5xx 退避、報告取最新一份的時間戳風險（todo-plan「【小補強】」）；逾時分支沒有自動測試
-- 專案紀錄（project-log）與公司完整版 reflection（`D:\Dev\project-records\company\art-collector-recommender\`）這次沒寫
+- 專案紀錄：本機真名版（journey、home.md、reflection 補記）已寫；second-brain 的去識別化 journey 段「段 B2 審閱」等使用者看過才寫
 - 第一至第三階段的實際 GCP 設定與整合驗收（todo-plan 各階段段落）
 
 ## 這次定下的決策
