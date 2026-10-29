@@ -30,40 +30,63 @@ TARGET_STAGE="menu"
 TARGET_ITEM=""
 PROJECT_ID=""
 
+# 選項需要值：缺值或後面直接接另一個選項就結束（結束碼 2），不悄悄套用預設
+require_value() {
+  if [ -z "${2:-}" ] || [[ "$2" == -* ]]; then
+    echo "❌ 選項 $1 需要接一個值（例如 $1 <值>）。" >&2
+    exit 2
+  fi
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --check-only) MODE="check-only" ;;
     --dry-run)    MODE="dry-run" ;;
     --stage|--wave)
+      require_value "$1" "${2:-}"
+      TARGET_STAGE="$2"
       shift
-      TARGET_STAGE="${1:-all}"
       ;;
     --stage=*|--wave=*)
+      require_value "${1%%=*}" "${1#*=}"
       TARGET_STAGE="${1#*=}"
       ;;
     --item)
-      shift
-      TARGET_ITEM="${1:-}"
+      require_value "$1" "${2:-}"
+      TARGET_ITEM="$2"
       TARGET_STAGE="item-${TARGET_ITEM}"
+      shift
       ;;
     --item=*)
+      require_value "${1%%=*}" "${1#*=}"
       TARGET_ITEM="${1#*=}"
       TARGET_STAGE="item-${TARGET_ITEM}"
       ;;
     --project)
+      require_value "$1" "${2:-}"
+      PROJECT_ID="$2"
       shift
-      PROJECT_ID="${1:-}"
       ;;
     --project=*)
+      require_value "${1%%=*}" "${1#*=}"
       PROJECT_ID="${1#*=}"
       ;;
     -h|--help)
       echo "用法: bash $0 [--stage 1|2|cost|all] [--item 1..8] [--project <Project ID>] [--check-only] [--dry-run]"
       exit 0
       ;;
+    *)
+      echo "❌ 不認得的選項：$1（用 --help 看可用的選項）。" >&2
+      exit 2
+      ;;
   esac
   shift
 done
+
+if [ -n "$TARGET_ITEM" ] && ! [[ "$TARGET_ITEM" =~ ^[1-8]$ ]]; then
+  echo "❌ --item 只接受 1～8（關卡編號），收到：${TARGET_ITEM}。" >&2
+  exit 2
+fi
 
 # ------------------------------------------------------------------------------
 # 0. 讀取參數檔 (config/params.json) 與報告目錄準備
@@ -139,6 +162,7 @@ SAVED_VERTEX_STATUS="未啟用（維持 AI Studio Paid Tier，NT$0 底租）"
 SAVED_EDM_STATUS="未啟用（維持人工操作或免費額度內 NT$0）"
 SAVED_EDM_MAX_NTD=0
 SAVED_SECRET_COUNT=2
+SAVED_SOURCE_DIR=""
 
 if [ -f "$STATE_FILE" ]; then
   while IFS='=' read -r s_key s_val; do
@@ -153,12 +177,13 @@ if [ -f "$STATE_FILE" ]; then
       STAGE3_LAST_RUN)       STAGE3_LAST_RUN="$s_val" ;;
       STAGE3_SUMMARY)        STAGE3_SUMMARY="$s_val" ;;
       SAVED_DB_CHOICE_LABEL) SAVED_DB_CHOICE_LABEL="$s_val" ;;
-      SAVED_DB_MIN_NTD)      SAVED_DB_MIN_NTD="$s_val" ;;
-      SAVED_DB_MAX_NTD)      SAVED_DB_MAX_NTD="$s_val" ;;
+      SAVED_DB_MIN_NTD)      [[ "$s_val" =~ ^[0-9]+$ ]] && SAVED_DB_MIN_NTD="$s_val" ;;
+      SAVED_DB_MAX_NTD)      [[ "$s_val" =~ ^[0-9]+$ ]] && SAVED_DB_MAX_NTD="$s_val" ;;
       SAVED_VERTEX_STATUS)   SAVED_VERTEX_STATUS="$s_val" ;;
       SAVED_EDM_STATUS)      SAVED_EDM_STATUS="$s_val" ;;
-      SAVED_EDM_MAX_NTD)     SAVED_EDM_MAX_NTD="$s_val" ;;
-      SAVED_SECRET_COUNT)    SAVED_SECRET_COUNT="$s_val" ;;
+      SAVED_EDM_MAX_NTD)     [[ "$s_val" =~ ^[0-9]+$ ]] && SAVED_EDM_MAX_NTD="$s_val" ;;
+      SAVED_SECRET_COUNT)    [[ "$s_val" =~ ^[0-9]+$ ]] && SAVED_SECRET_COUNT="$s_val" ;;
+      SAVED_SOURCE_DIR)      SAVED_SOURCE_DIR="$s_val" ;;
     esac
   done < "$STATE_FILE"
 fi
@@ -249,8 +274,8 @@ list_cloud_run_services() {
     [ "$pid" = "demo-art-collector-proj" ] && printf "art-collector-web\thttps://art-collector-web-demo-uc.a.run.app\n"
     return 0
   fi
-  if gcloud services list --enabled --project="$pid" --filter="config.name:run.googleapis.com" --format="value(config.name)" 2>/dev/null | grep -q "run.googleapis.com"; then
-    gcloud run services list --project="$pid" --platform=managed --format="value(metadata.name,status.url)" --quiet 2>/dev/null || true
+  if gcloud services list --enabled --project="$pid" --filter="config.name:run.googleapis.com" --format="value(config.name)" </dev/null 2>/dev/null | grep -q "run.googleapis.com"; then
+    gcloud run services list --project="$pid" --platform=managed --format="value(metadata.name,status.url)" --quiet </dev/null 2>/dev/null || true
   fi
 }
 
@@ -307,9 +332,10 @@ if [ -z "$PROJECT_ID" ]; then
   [ -z "$DEFAULT_PICK" ] && DEFAULT_PICK=1
 
   project_choice=1
+  PROJECT_AUTO_PICK="false"
   if [ "$idx" -gt 1 ]; then
     project_choice=""
-    read -r -p "👉 請輸入要檢查的專案編號 [1-${idx}，直接按 Enter 預設選 ${DEFAULT_PICK}]: " project_choice || true
+    read -r -p "👉 請輸入要檢查的專案編號 [1-${idx}，直接按 Enter 預設選 ${DEFAULT_PICK}]: " project_choice || PROJECT_AUTO_PICK="true"
     project_choice="${project_choice:-$DEFAULT_PICK}"
     if ! [[ "$project_choice" =~ ^[0-9]+$ ]] || [ "$project_choice" -lt 1 ] || [ "$project_choice" -gt "$idx" ]; then
       echo "⚠️ 編號 ${project_choice} 不在清單內，改用預設 [${DEFAULT_PICK}]。"
@@ -317,6 +343,9 @@ if [ -z "$PROJECT_ID" ]; then
     fi
   fi
   PROJECT_ID="${PROJECT_IDS[$((project_choice - 1))]}"
+  if [ "$PROJECT_AUTO_PICK" = "true" ]; then
+    echo "ℹ️  非互動模式且未指定 --project：自動選了 [${project_choice}] ${PROJECT_ID}（有多個專案時請改用 --project <Project ID> 明確指定）。"
+  fi
   if [ "$RUN_PROJECT_TOTAL" -eq 0 ]; then
     echo "⚠️ 所有專案都沒有探測到 Cloud Run 網站：可能網站還在 Google AI Studio 尚未部署，或 Cloud Run API 未啟用。腳本照常檢查所選專案。"
   fi
@@ -360,6 +389,37 @@ STAGE_LOG_LINES=()
 
 add_stage_log() {
   STAGE_LOG_LINES+=("$1")
+}
+
+# 套用資料庫方案：先問 y/N（會重啟、儲存空間不可縮減），patch 成功才記為已完成並更新月租估算
+# 用法：apply_db_plan <方案編號> <標籤> <月租下限> <月租上限> <成功時的報告文字> [gcloud patch 參數...]
+# 沒給 patch 參數代表機型本來就對，不用動雲端；回傳 0=已套用、1=取消或失敗（資料庫維持原狀）
+apply_db_plan() {
+  local plan="$1" label="$2" min="$3" max="$4" ok_log="$5"
+  shift 5
+  if [ "$#" -gt 0 ] && [ "$MODE" != "dry-run" ]; then
+    local ans=""
+    read -r -p "⚠️ 這會讓 ${SQL_INSTANCE} 重啟約 2～3 分鐘（儲存空間只能加大、不能縮小）。確定要執行方案 ${plan}？[y/N]: " ans || ans=""
+    if ! [[ "$ans" =~ ^[Yy]$ ]]; then
+      echo "⏭️  [本次暫緩跳過] 已取消方案 ${plan}，資料庫維持原狀。"
+      DEFERRED_COUNT=$((DEFERRED_COUNT + 1))
+      add_stage_log "| 細項 2-3 | Cloud SQL 資料庫月租規格選型 | ⏭️ 方案 ${plan} 已取消，維持現況 |"
+      return 1
+    fi
+    if ! gcloud sql instances patch "$SQL_INSTANCE" "$@" --project="$PROJECT_ID"; then
+      echo "❌ 方案 ${plan} 套用失敗，資料庫維持原狀，費用估算不變。"
+      MANUAL_TODO_LIST+=("細項 2-3 [方案 ${plan}]：腳本套用失敗，請於 https://console.cloud.google.com/sql/instances?project=${PROJECT_ID} 手動調整。")
+      add_stage_log "| 細項 2-3 | Cloud SQL 資料庫月租規格選型 | ❌ 方案 ${plan} 套用失敗，維持現況 |"
+      return 1
+    fi
+  fi
+  echo "✅ 已套用方案 ${plan}：${ok_log}"
+  FIXED_COUNT=$((FIXED_COUNT + 1))
+  SAVED_DB_CHOICE_LABEL="$label"
+  SAVED_DB_MIN_NTD="$min"
+  SAVED_DB_MAX_NTD="$max"
+  add_stage_log "| 細項 2-3 | Cloud SQL 資料庫月租規格選型 | 🔧 ${ok_log} |"
+  return 0
 }
 
 # ==============================================================================
@@ -442,13 +502,32 @@ if should_run_item 2; then
       read -r -p "👉 [可選細項] 是否現在輸入「部門公務 Gmail 或主管 Gmail」由腳本自動加入為共同 Owner？[y=現在加 / n=先跳過]: " ans
       if [[ "$ans" =~ ^[Yy]$ ]]; then
         read -r -p "請輸入要加入為共同 Owner 的 Gmail 信箱: " new_owner_email
-        if [ -n "$new_owner_email" ]; then
-          gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-            --member="user:${new_owner_email}" \
-            --role="roles/owner"
-          echo "✅ 已將 ${new_owner_email} 加入為專案共同 Owner！"
-          FIXED_COUNT=$((FIXED_COUNT + 1))
-          add_stage_log "| 細項 1-2 | 雙管理員（Owner）帳號共管 | 🔧 本次已新增共同 Owner (${new_owner_email}) |"
+        if [ -z "$new_owner_email" ]; then
+          echo "⏭️  [本次暫緩跳過] 沒有輸入信箱，不加入共同 Owner。"
+          DEFERRED_COUNT=$((DEFERRED_COUNT + 1))
+          add_stage_log "| 細項 1-2 | 雙管理員（Owner）帳號共管 | ⏭️ 本次暫緩（未輸入信箱） |"
+        elif ! [[ "$new_owner_email" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; then
+          echo "❌ 「${new_owner_email}」不是正確的信箱格式，沒有加入任何人。"
+          DEFERRED_COUNT=$((DEFERRED_COUNT + 1))
+          MANUAL_TODO_LIST+=("細項 1-2 [新增共同 Owner]：輸入的信箱格式不正確，請於 https://console.cloud.google.com/iam-admin/iam?project=${PROJECT_ID} 手動加入。")
+          add_stage_log "| 細項 1-2 | 雙管理員（Owner）帳號共管 | ❌ 信箱格式不正確，未加入 |"
+        else
+          read -r -p "👉 將把「${new_owner_email}」加為專案 ${PROJECT_ID} 的最高管理員（Owner）。信箱沒打錯嗎？[y/N]: " owner_ok
+          if ! [[ "$owner_ok" =~ ^[Yy]$ ]]; then
+            echo "⏭️  [本次暫緩跳過] 已取消，沒有加入任何人。"
+            DEFERRED_COUNT=$((DEFERRED_COUNT + 1))
+            add_stage_log "| 細項 1-2 | 雙管理員（Owner）帳號共管 | ⏭️ 本次暫緩（使用者取消） |"
+          elif gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+              --member="user:${new_owner_email}" \
+              --role="roles/owner" >/dev/null; then
+            echo "✅ 已將 ${new_owner_email} 加入為專案共同 Owner！"
+            FIXED_COUNT=$((FIXED_COUNT + 1))
+            add_stage_log "| 細項 1-2 | 雙管理員（Owner）帳號共管 | 🔧 本次已新增共同 Owner (${new_owner_email}) |"
+          else
+            echo "❌ 加入 ${new_owner_email} 失敗（可能權限不足），沒有變更。"
+            MANUAL_TODO_LIST+=("細項 1-2 [新增共同 Owner]：腳本加入 ${new_owner_email} 失敗，請於 https://console.cloud.google.com/iam-admin/iam?project=${PROJECT_ID} 手動加入。")
+            add_stage_log "| 細項 1-2 | 雙管理員（Owner）帳號共管 | ❌ 加入失敗，需手動處理 |"
+          fi
         fi
       else
         echo "⏭️  [本次暫緩跳過] 保留稍後設定，將於報告附上 IAM 設定網址。"
@@ -565,15 +644,27 @@ if should_run_item 4; then
       if [ "$MODE" = "interactive" ]; then
         read -r -p "👉 [可選細項] 是否現在於雲端保險箱建立 ${SECRET_NAME}？(若暫不建立可按 N 跳過) [y/N]: " create_sec
         if [[ "$create_sec" =~ ^[Yy]$ ]]; then
-          gcloud services enable secretmanager.googleapis.com --project="$PROJECT_ID"
+          if ! gcloud services enable secretmanager.googleapis.com --project="$PROJECT_ID"; then
+            echo "❌ 啟用 Secret Manager API 失敗，沒有建立 ${SECRET_NAME}。"
+            MANUAL_TODO_LIST+=("細項 2-1 [建立 ${SECRET_NAME}]：啟用 Secret Manager API 失敗，請於 https://console.cloud.google.com/security/secret-manager?project=${PROJECT_ID} 手動處理。")
+            add_stage_log "| 細項 2-1 | Secret Manager 金鑰隔離 (${SECRET_NAME}) | ❌ 啟用 API 失敗，未建立 |"
+            continue
+          fi
           read -r -s -p "請貼上 ${SECRET_NAME} 的值（輸入時畫面不會顯示明文，按 Enter 結束）: " secret_val
           echo ""
-          if [ -n "$secret_val" ]; then
-            printf "%s" "$secret_val" | gcloud secrets create "$SECRET_NAME" --data-file=- --project="$PROJECT_ID"
+          if [ -z "$secret_val" ]; then
+            echo "⏭️  [本次暫緩跳過] 沒有輸入值，不建立 ${SECRET_NAME}。"
+            DEFERRED_COUNT=$((DEFERRED_COUNT + 1))
+            add_stage_log "| 細項 2-1 | Secret Manager 金鑰隔離 (${SECRET_NAME}) | ⏭️ 本次暫緩（未輸入值） |"
+          elif printf "%s" "$secret_val" | gcloud secrets create "$SECRET_NAME" --data-file=- --project="$PROJECT_ID"; then
             echo "✅ 已安全建立密鑰 ${SECRET_NAME}！"
             FIXED_COUNT=$((FIXED_COUNT + 1))
             FOUND_SECRETS=$((FOUND_SECRETS + 1))
             add_stage_log "| 細項 2-1 | Secret Manager 金鑰隔離 (${SECRET_NAME}) | 🔧 本次已建立完成 |"
+          else
+            echo "❌ 建立密鑰 ${SECRET_NAME} 失敗，沒有計入已完成。"
+            MANUAL_TODO_LIST+=("細項 2-1 [建立 ${SECRET_NAME}]：腳本建立失敗，請於 https://console.cloud.google.com/security/secret-manager?project=${PROJECT_ID} 手動建立。")
+            add_stage_log "| 細項 2-1 | Secret Manager 金鑰隔離 (${SECRET_NAME}) | ❌ 建立失敗，需手動處理 |"
           fi
         else
           echo "⏭️  [本次暫緩跳過] 暫不建立 ${SECRET_NAME}。"
@@ -600,6 +691,7 @@ if should_run_item 5 || should_run_item 6; then
     BACKUP_ENABLED="True"
     CURRENT_TIER="db-g1-small"
     ACTIVATION_POLICY="ALWAYS"
+    PRIVATE_NETWORK="projects/demo/global/networks/default"
   else
     SQL_INSTANCE="$(gcloud sql instances list --project="$PROJECT_ID" --format="value(name)" 2>/dev/null | head -n 1 || true)"
   fi
@@ -614,6 +706,7 @@ if should_run_item 5 || should_run_item 6; then
       BACKUP_ENABLED="$(gcloud sql instances describe "$SQL_INSTANCE" --project="$PROJECT_ID" --format="value(settings.backupConfiguration.enabled)" 2>/dev/null || echo "Unknown")"
       CURRENT_TIER="$(gcloud sql instances describe "$SQL_INSTANCE" --project="$PROJECT_ID" --format="value(settings.tier)" 2>/dev/null || echo "Unknown")"
       ACTIVATION_POLICY="$(gcloud sql instances describe "$SQL_INSTANCE" --project="$PROJECT_ID" --format="value(settings.activationPolicy)" 2>/dev/null || echo "Unknown")"
+      PRIVATE_NETWORK="$(gcloud sql instances describe "$SQL_INSTANCE" --project="$PROJECT_ID" --format="value(settings.ipConfiguration.privateNetwork)" 2>/dev/null || echo "")"
     fi
 
     if should_run_item 5; then
@@ -628,19 +721,38 @@ if should_run_item 5 || should_run_item 6; then
       echo "📌 偵測到 Cloud SQL 實例：${SQL_INSTANCE} (目前規格: ${CURRENT_TIER}, 狀態策略: ${ACTIVATION_POLICY})"
 
       # 5a. 公網 IP 檢查
-      if [ "$IPV4_ENABLED" = "False" ] || [ "$IPV4_ENABLED" = "false" ] || [ -z "$IPV4_ENABLED" ]; then
+      if [ "$IPV4_ENABLED" = "Unknown" ]; then
+        echo "⚠️  [無法確認] 讀不到 Cloud SQL 的公網 IP 設定（gcloud 查詢失敗），不當作已關閉。"
+        MANUAL_TODO_LIST+=("細項 2-2a [確認公網 IP]：腳本讀不到 ${SQL_INSTANCE} 的設定，請於 https://console.cloud.google.com/sql/instances?project=${PROJECT_ID} 確認公網 IP 是否已關閉。")
+        add_stage_log "| 細項 2-2a | Cloud SQL 關閉對外公網 IP | ⚠️ 無法確認（讀取設定失敗） |"
+      elif [ "$IPV4_ENABLED" = "False" ] || [ "$IPV4_ENABLED" = "false" ] || [ -z "$IPV4_ENABLED" ]; then
         echo "✅ [已存在，自動跳過] Cloud SQL 公網 IP (Public IP) 已關閉，外部網路無法直接掃描攻擊。"
         SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
         add_stage_log "| 細項 2-2a | Cloud SQL 關閉對外公網 IP | ✅ 已符合（公網 IP 已關閉） |"
       else
         echo "⚠️  [尚未設定] Cloud SQL 目前開啟了公網 IP (ipv4Enabled=${IPV4_ENABLED})！"
         if [ "$MODE" = "interactive" ]; then
-          read -r -p "👉 [可選細項] 是否現在關閉 ${SQL_INSTANCE} 的公網 IP？（請先確認已設好內網連線，或按 N 先跳過）[y/N]: " disable_ip
-          if [[ "$disable_ip" =~ ^[Yy]$ ]]; then
-            gcloud sql instances patch "$SQL_INSTANCE" --no-assign-ip --project="$PROJECT_ID"
-            echo "✅ 已關閉 ${SQL_INSTANCE} 公網 IP！"
-            FIXED_COUNT=$((FIXED_COUNT + 1))
-            add_stage_log "| 細項 2-2a | Cloud SQL 關閉對外公網 IP | 🔧 本次已關閉公網 IP |"
+          if [ -z "$PRIVATE_NETWORK" ]; then
+            echo "⛔ ${SQL_INSTANCE} 沒有設定私有網路連線（Private IP）：現在關掉公網 IP，網站會連不到資料庫，所以這次不動。請先設好私有連線再回來關。"
+            DEFERRED_COUNT=$((DEFERRED_COUNT + 1))
+            MANUAL_TODO_LIST+=("細項 2-2a [關閉公網 IP]：${SQL_INSTANCE} 尚無私有網路連線，請先於 https://console.cloud.google.com/sql/instances?project=${PROJECT_ID} 設好 Private IP 與 Cloud Run 的連線，再關閉公網 IP。")
+            add_stage_log "| 細項 2-2a | Cloud SQL 關閉對外公網 IP | ⏭️ 尚無私有連線，暫不關閉 |"
+            disable_ip="skip"
+          else
+            read -r -p "👉 [可選細項] 是否現在關閉 ${SQL_INSTANCE} 的公網 IP？（已有私有連線；關閉會讓資料庫重啟約 2～3 分鐘，期間網站暫時連不到）[y/N]: " disable_ip
+          fi
+          if [ "$disable_ip" = "skip" ]; then
+            :
+          elif [[ "$disable_ip" =~ ^[Yy]$ ]]; then
+            if gcloud sql instances patch "$SQL_INSTANCE" --no-assign-ip --project="$PROJECT_ID"; then
+              echo "✅ 已關閉 ${SQL_INSTANCE} 公網 IP！"
+              FIXED_COUNT=$((FIXED_COUNT + 1))
+              add_stage_log "| 細項 2-2a | Cloud SQL 關閉對外公網 IP | 🔧 本次已關閉公網 IP |"
+            else
+              echo "❌ 關閉公網 IP 失敗，設定沒有變更。"
+              MANUAL_TODO_LIST+=("細項 2-2a [關閉公網 IP]：腳本執行失敗，請於 https://console.cloud.google.com/sql/instances?project=${PROJECT_ID} 手動處理。")
+              add_stage_log "| 細項 2-2a | Cloud SQL 關閉對外公網 IP | ❌ 執行失敗，需手動處理 |"
+            fi
           else
             echo "⏭️  [本次暫緩跳過] 保留公網 IP 現況。"
             DEFERRED_COUNT=$((DEFERRED_COUNT + 1))
@@ -661,10 +773,15 @@ if should_run_item 5 || should_run_item 6; then
         if [ "$MODE" = "interactive" ]; then
           read -r -p "👉 [可選細項] 是否開啟強制 SSL 加密連線？[y/N]: " enable_ssl
           if [[ "$enable_ssl" =~ ^[Yy]$ ]]; then
-            gcloud sql instances patch "$SQL_INSTANCE" --require-ssl --project="$PROJECT_ID"
-            echo "✅ 已開啟強制 SSL 連線！"
-            FIXED_COUNT=$((FIXED_COUNT + 1))
-            add_stage_log "| 細項 2-2b | Cloud SQL 強制 SSL 加密連線 | 🔧 本次已開啟 |"
+            if gcloud sql instances patch "$SQL_INSTANCE" --require-ssl --project="$PROJECT_ID"; then
+              echo "✅ 已開啟強制 SSL 連線！"
+              FIXED_COUNT=$((FIXED_COUNT + 1))
+              add_stage_log "| 細項 2-2b | Cloud SQL 強制 SSL 加密連線 | 🔧 本次已開啟 |"
+            else
+              echo "❌ 開啟強制 SSL 失敗，設定沒有變更。"
+              MANUAL_TODO_LIST+=("細項 2-2b [強制 SSL]：腳本執行失敗，請於 https://console.cloud.google.com/sql/instances?project=${PROJECT_ID} 手動處理。")
+              add_stage_log "| 細項 2-2b | Cloud SQL 強制 SSL 加密連線 | ❌ 執行失敗，需手動處理 |"
+            fi
           else
             DEFERRED_COUNT=$((DEFERRED_COUNT + 1))
             add_stage_log "| 細項 2-2b | Cloud SQL 強制 SSL 加密連線 | ⏭️ 本次暫緩跳過 |"
@@ -684,10 +801,15 @@ if should_run_item 5 || should_run_item 6; then
         if [ "$MODE" = "interactive" ]; then
           read -r -p "👉 [可選細項] 是否立即開啟每日自動備份（保留 ${BACKUP_RETENTION_DAYS} 天）？[y/N]: " enable_bak
           if [[ "$enable_bak" =~ ^[Yy]$ ]]; then
-            gcloud sql instances patch "$SQL_INSTANCE" --backup-start-time=03:00 --retained-backups-count="$BACKUP_RETENTION_DAYS" --project="$PROJECT_ID"
-            echo "✅ 已開啟每日凌晨 03:00 自動備份（保留 ${BACKUP_RETENTION_DAYS} 份）！"
-            FIXED_COUNT=$((FIXED_COUNT + 1))
-            add_stage_log "| 細項 2-2c | Cloud SQL 每日自動備份 (${BACKUP_RETENTION_DAYS}天) | 🔧 本次已開啟 |"
+            if gcloud sql instances patch "$SQL_INSTANCE" --backup-start-time=03:00 --retained-backups-count="$BACKUP_RETENTION_DAYS" --project="$PROJECT_ID"; then
+              echo "✅ 已開啟每日凌晨 03:00 自動備份（保留 ${BACKUP_RETENTION_DAYS} 份）！"
+              FIXED_COUNT=$((FIXED_COUNT + 1))
+              add_stage_log "| 細項 2-2c | Cloud SQL 每日自動備份 (${BACKUP_RETENTION_DAYS}天) | 🔧 本次已開啟 |"
+            else
+              echo "❌ 開啟自動備份失敗，設定沒有變更。"
+              MANUAL_TODO_LIST+=("細項 2-2c [每日自動備份]：腳本執行失敗，請於 https://console.cloud.google.com/sql/instances?project=${PROJECT_ID} 手動處理。")
+              add_stage_log "| 細項 2-2c | Cloud SQL 每日自動備份 (${BACKUP_RETENTION_DAYS}天) | ❌ 執行失敗，需手動處理 |"
+            fi
           else
             DEFERRED_COUNT=$((DEFERRED_COUNT + 1))
             add_stage_log "| 細項 2-2c | Cloud SQL 每日自動備份 (${BACKUP_RETENTION_DAYS}天) | ⏭️ 本次暫緩跳過 |"
@@ -711,12 +833,16 @@ if should_run_item 5 || should_run_item 6; then
       echo ""
       echo "   [1] 維持現有規格 (${CURRENT_TIER}) — 不做任何變更（直接跳過）"
       echo "   [2] 最省錢方案：db-f1-micro (0.6 GB RAM，24h 開機)          ➔ 預估月租：約 NT\$280～350 / 月"
+      echo "       (只換機型：儲存空間與備份天數維持現況，不跟著改)"
       echo "   [3] 🌟 推薦 500–600 甜區 A：db-g1-small (1.7 GB RAM 順暢版) ＋ 平日上下班自動啟停排程"
       echo "       (平日 08:00–22:00 開機，夜間與週末休眠省 58% 運算費；EDM 排程請設於上班時段) ➔ 預估月租：約 NT\$480～560 / 月"
       echo "   [4] 🌟 24h 500–600 甜區 B：db-f1-micro (0.6 GB RAM，24h 開機) ＋ 50GB SSD ＋ 30天 PITR 時間點還原"
       echo "       (適合半夜週末也要排程寄送 EDM、且重視大容量與長天數完整備份) ➔ 預估月租：約 NT\$500～580 / 月"
       echo "   [5] 全天候順暢方案：db-g1-small (1.7 GB RAM，24h 不關機)    ➔ 預估月租：約 NT\$780～880 / 月"
       echo "   [6] 正式高併發方案：db-custom-1-3840 (1 獨立 vCPU / 3.75GB) ➔ 預估月租：約 NT\$1,700～1,950 / 月"
+      echo "   ※ 方案 2、3、5、6 只換機型，儲存空間與備份天數維持現況（月租會依現有儲存量略有增減）；只有方案 4 會同時加大儲存與備份。"
+      echo "   ※ 方案 3 的「平日上下班自動啟停」本腳本不會替您建立排程，需自行設定，否則等同 24h 開機（約 NT\$780～880 / 月）。"
+      echo "   ※ 換規格會讓資料庫重啟約 2～3 分鐘；儲存空間只能加大、不能縮小。"
       echo ""
 
       if [ "$MODE" = "interactive" ] || [ "$MODE" = "dry-run" ]; then
@@ -732,71 +858,66 @@ if should_run_item 5 || should_run_item 6; then
           1)
             echo "✅ [維持現況，自動跳過] 保留目前規格 ${CURRENT_TIER}。"
             SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
-            if [ "$CURRENT_TIER" = "db-f1-micro" ]; then
-              SAVED_DB_CHOICE_LABEL="維持現況：db-f1-micro (24h 開機)"
-              SAVED_DB_MIN_NTD=280
-              SAVED_DB_MAX_NTD=350
-            else
-              SAVED_DB_CHOICE_LABEL="維持現況：${CURRENT_TIER}"
-              SAVED_DB_MIN_NTD=480
-              SAVED_DB_MAX_NTD=880
-            fi
+            case "$CURRENT_TIER" in
+              db-f1-micro)
+                SAVED_DB_CHOICE_LABEL="維持現況：db-f1-micro (24h 開機)"
+                SAVED_DB_MIN_NTD=280
+                SAVED_DB_MAX_NTD=350
+                ;;
+              db-g1-small)
+                SAVED_DB_CHOICE_LABEL="維持現況：db-g1-small (24h 開機)"
+                SAVED_DB_MIN_NTD=780
+                SAVED_DB_MAX_NTD=880
+                ;;
+              db-custom-1-3840)
+                SAVED_DB_CHOICE_LABEL="維持現況：db-custom-1-3840 (1 vCPU / 3.75GB RAM，24h)"
+                SAVED_DB_MIN_NTD=1700
+                SAVED_DB_MAX_NTD=1950
+                ;;
+              *)
+                SAVED_DB_CHOICE_LABEL="維持現況：${CURRENT_TIER}（月租未知，合計沿用先前的估算值）"
+                ;;
+            esac
             add_stage_log "| 細項 2-3 | Cloud SQL 資料庫月租規格選型 | ✅ 維持現有規格 (${CURRENT_TIER}) |"
             ;;
           2)
             echo "🔧 正在將 ${SQL_INSTANCE} 調整為 db-f1-micro..."
-            [ "$MODE" != "dry-run" ] && gcloud sql instances patch "$SQL_INSTANCE" --tier=db-f1-micro --project="$PROJECT_ID"
-            FIXED_COUNT=$((FIXED_COUNT + 1))
-            SAVED_DB_CHOICE_LABEL="方案 2：db-f1-micro (0.6GB RAM，24h 開機)"
-            SAVED_DB_MIN_NTD=280
-            SAVED_DB_MAX_NTD=350
-            add_stage_log "| 細項 2-3 | Cloud SQL 資料庫月租規格選型 | 🔧 已選方案 2：db-f1-micro (約 NT\$280～350/月) |"
+            apply_db_plan "2" "方案 2：db-f1-micro (0.6GB RAM，24h 開機)" 280 350 \
+              "已選方案 2：db-f1-micro (約 NT\$280～350/月)" \
+              --tier=db-f1-micro
             ;;
           3)
-            echo "🔧 正在將 ${SQL_INSTANCE} 調整為 db-g1-small (1.7 GB RAM)，並套用上下班排程說明..."
+            echo "🔧 正在將 ${SQL_INSTANCE} 調整為 db-g1-small (1.7 GB RAM)..."
             if [ "$CURRENT_TIER" != "db-g1-small" ]; then
-              [ "$MODE" != "dry-run" ] && gcloud sql instances patch "$SQL_INSTANCE" --tier=db-g1-small --project="$PROJECT_ID"
+              set -- --tier=db-g1-small
             else
               echo "   (實例已經是 db-g1-small，無須重設機型)"
+              set --
             fi
-            echo "💡 【上下班自動啟停與 EDM 排程提醒】：請將 EDM 發送排程設於平日 08:30–21:30 資料庫開機時段內，即可將月租穩定控制在 NT\$480～560！"
-            FIXED_COUNT=$((FIXED_COUNT + 1))
-            SAVED_DB_CHOICE_LABEL="方案 3A：db-g1-small (1.7GB RAM) + 平日 08:00-22:00 開機排程"
-            SAVED_DB_MIN_NTD=480
-            SAVED_DB_MAX_NTD=560
-            add_stage_log "| 細項 2-3 | Cloud SQL 資料庫月租規格選型 | 🔧 已選方案 3A：db-g1-small 平日排程 (約 NT\$480～560/月) |"
+            if apply_db_plan "3A" "方案 3A：db-g1-small (1.7GB RAM)（上下班啟停排程需自行設定，否則約 NT\$780～880/月）" 480 560 \
+              "已選方案 3A：db-g1-small（排程需自行設定，否則約 NT\$780～880/月；目標 NT\$480～560/月）" \
+              "$@"; then
+              echo "💡 【上下班自動啟停與 EDM 排程提醒】：本腳本不會建立啟停排程。請自行設定平日 08:00–22:00 開機、其餘時段休眠，並把 EDM 發送排程設在 08:30–21:30 內，月租才會落在 NT\$480～560；沒設的話等同 24h 開機（約 NT\$780～880）。"
+              MANUAL_TODO_LIST+=("細項 2-3 [方案 3A 上下班啟停排程]：本腳本不會建立排程，請用 Cloud Scheduler 自行設定資料庫平日 08:00 開機、22:00 休眠；沒設定則約 NT\$780～880/月，不是 NT\$480～560。")
+            fi
             ;;
           4)
             echo "🔧 正在將 ${SQL_INSTANCE} 設定為 db-f1-micro + 50GB SSD + 30 天備份與 PITR..."
-            [ "$MODE" != "dry-run" ] && gcloud sql instances patch "$SQL_INSTANCE" \
-              --tier=db-f1-micro \
-              --storage-size=50GB \
-              --retained-backups-count=30 \
-              --enable-point-in-time-recovery \
-              --project="$PROJECT_ID"
-            FIXED_COUNT=$((FIXED_COUNT + 1))
-            SAVED_DB_CHOICE_LABEL="方案 3B：db-f1-micro (24h) + 50GB SSD + 30天 PITR 備份"
-            SAVED_DB_MIN_NTD=500
-            SAVED_DB_MAX_NTD=580
-            add_stage_log "| 細項 2-3 | Cloud SQL 資料庫月租規格選型 | 🔧 已選方案 3B：db-f1-micro + 50GB + 30天PITR (約 NT\$500～580/月) |"
+            apply_db_plan "4" "方案 3B：db-f1-micro (24h) + 50GB SSD + 30天 PITR 備份" 500 580 \
+              "已選方案 3B：db-f1-micro + 50GB + 30天PITR (約 NT\$500～580/月)" \
+              --tier=db-f1-micro --storage-size=50GB --retained-backups-count=30 --enable-point-in-time-recovery
             ;;
           5)
             echo "🔧 正在將 ${SQL_INSTANCE} 調整為 db-g1-small (24h 全天候運行)..."
-            [ "$MODE" != "dry-run" ] && gcloud sql instances patch "$SQL_INSTANCE" --tier=db-g1-small --project="$PROJECT_ID"
-            FIXED_COUNT=$((FIXED_COUNT + 1))
-            SAVED_DB_CHOICE_LABEL="方案 5：db-g1-small (1.7GB RAM，24h 不關機)"
-            SAVED_DB_MIN_NTD=780
-            SAVED_DB_MAX_NTD=880
-            add_stage_log "| 細項 2-3 | Cloud SQL 資料庫月租規格選型 | 🔧 已選方案 5：db-g1-small 24h (約 NT\$780～880/月) |"
+            apply_db_plan "5" "方案 5：db-g1-small (1.7GB RAM，24h 不關機)" 780 880 \
+              "已選方案 5：db-g1-small 24h (約 NT\$780～880/月)" \
+              --tier=db-g1-small
             ;;
           6)
             echo "🔧 正在將 ${SQL_INSTANCE} 調整為 db-custom-1-3840 (獨立核心)..."
-            [ "$MODE" != "dry-run" ] && gcloud sql instances patch "$SQL_INSTANCE" --tier=db-custom-1-3840 --project="$PROJECT_ID"
-            FIXED_COUNT=$((FIXED_COUNT + 1))
-            SAVED_DB_CHOICE_LABEL="方案 6：db-custom-1-3840 (1 vCPU / 3.75GB RAM，24h)"
-            SAVED_DB_MIN_NTD=1700
-            SAVED_DB_MAX_NTD=1950
-            add_stage_log "| 細項 2-3 | Cloud SQL 資料庫月租規格選型 | 🔧 已選方案 6：db-custom-1-3840 (約 NT\$1,700～1,950/月) |"
+            apply_db_plan "6" "方案 6：db-custom-1-3840 (1 vCPU / 3.75GB RAM，24h)" 1700 1950 \
+              "已選方案 6：db-custom-1-3840 (約 NT\$1,700～1,950/月)" \
+              --tier=db-custom-1-3840
             ;;
           *)
             echo "ℹ️  未識別的選項，保留現有規格 ${CURRENT_TIER}。"
@@ -850,19 +971,34 @@ if should_run_item 7; then
 
       if [ "$ai_arch_choice" = "2" ]; then
         echo "🔧 正在啟用 Vertex AI API (aiplatform.googleapis.com) 並配置 IAM 權限..."
+        VERTEX_OK="true"
         if [ "$MODE" != "dry-run" ]; then
-          gcloud services enable aiplatform.googleapis.com --project="$PROJECT_ID"
-          PROJECT_NUM="$(gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)" 2>/dev/null || true)"
-          if [ -n "$PROJECT_NUM" ]; then
-            gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+          if ! gcloud services enable aiplatform.googleapis.com --project="$PROJECT_ID"; then
+            VERTEX_OK="false"
+          else
+            PROJECT_NUM="$(gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)" 2>/dev/null || true)"
+            if [ -z "$PROJECT_NUM" ] || ! gcloud projects add-iam-policy-binding "$PROJECT_ID" \
               --member="serviceAccount:${PROJECT_NUM}-compute@developer.gserviceaccount.com" \
-              --role="roles/aiplatform.user" >/dev/null
+              --role="roles/aiplatform.user" >/dev/null; then
+              VERTEX_OK="partial"
+            fi
           fi
         fi
-        echo "✅ 已啟用 Vertex AI API 並完成服務帳戶授權（roles/aiplatform.user）！"
-        FIXED_COUNT=$((FIXED_COUNT + 1))
-        SAVED_VERTEX_STATUS="已啟用 Vertex AI API（依實際呼叫字數計費，無底租）"
-        add_stage_log "| 細項 2-4 | [選配] 啟用 Vertex AI API | 🔧 本次已選配啟用 |"
+        if [ "$VERTEX_OK" = "true" ]; then
+          echo "✅ 已啟用 Vertex AI API 並完成服務帳戶授權（roles/aiplatform.user）！"
+          FIXED_COUNT=$((FIXED_COUNT + 1))
+          SAVED_VERTEX_STATUS="已啟用 Vertex AI API（依實際呼叫字數計費，無底租）"
+          add_stage_log "| 細項 2-4 | [選配] 啟用 Vertex AI API | 🔧 本次已選配啟用 |"
+        elif [ "$VERTEX_OK" = "partial" ]; then
+          echo "⚠️ Vertex AI API 已啟用，但服務帳戶授權（roles/aiplatform.user）失敗，Cloud Run 還不能呼叫。"
+          MANUAL_TODO_LIST+=("細項 2-4 [Vertex AI 授權]：API 已啟用但授權失敗，請於 https://console.cloud.google.com/iam-admin/iam?project=${PROJECT_ID} 替 Cloud Run 服務帳戶加上 Vertex AI 使用者角色。")
+          SAVED_VERTEX_STATUS="已啟用 Vertex AI API（授權未完成，依實際呼叫字數計費，無底租）"
+          add_stage_log "| 細項 2-4 | [選配] 啟用 Vertex AI API | ⚠️ API 已啟用，授權失敗，需手動處理 |"
+        else
+          echo "❌ 啟用 Vertex AI API 失敗，沒有變更。"
+          MANUAL_TODO_LIST+=("細項 2-4 [啟用 Vertex AI]：腳本啟用失敗，請於 https://console.cloud.google.com/apis/library/aiplatform.googleapis.com?project=${PROJECT_ID} 手動啟用。")
+          add_stage_log "| 細項 2-4 | [選配] 啟用 Vertex AI API | ❌ 啟用失敗，需手動處理 |"
+        fi
       else
         echo "✅ [非必要選配，跳過] 維持採用 Google AI Studio (Paid Tier) 架構。"
         SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
@@ -921,15 +1057,18 @@ if should_run_item 8; then
 
       if [ "$edm_sched_choice" = "2" ]; then
         echo "🔧 正在啟用 Cloud Scheduler API (cloudscheduler.googleapis.com)..."
-        if [ "$MODE" != "dry-run" ]; then
-          gcloud services enable cloudscheduler.googleapis.com --project="$PROJECT_ID"
+        if [ "$MODE" != "dry-run" ] && ! gcloud services enable cloudscheduler.googleapis.com --project="$PROJECT_ID"; then
+          echo "❌ 啟用 Cloud Scheduler API 失敗，沒有變更。"
+          MANUAL_TODO_LIST+=("細項 2-5 [啟用 Cloud Scheduler]：腳本啟用失敗，請於 https://console.cloud.google.com/apis/library/cloudscheduler.googleapis.com?project=${PROJECT_ID} 手動啟用。")
+          add_stage_log "| 細項 2-5 | [選配] 排程自動發送 EDM (Cloud Scheduler) | ❌ 啟用失敗，需手動處理 |"
+        else
+          echo "✅ 已啟用 Cloud Scheduler API！單日發送上限建議鎖定 ${EDM_DAILY_SEND_LIMIT} 封。"
+          FIXED_COUNT=$((FIXED_COUNT + 1))
+          CHECK_EDM_SECRETS="true"
+          SAVED_EDM_STATUS="已啟用 Cloud Scheduler（前 3 個排程 NT\$0 + Resend/Brevo 免費層 NT\$0）"
+          SAVED_EDM_MAX_NTD=0
+          add_stage_log "| 細項 2-5 | [選配] 排程自動發送 EDM (Cloud Scheduler) | 🔧 本次已選配啟用 |"
         fi
-        echo "✅ 已啟用 Cloud Scheduler API！單日發送上限建議鎖定 ${EDM_DAILY_SEND_LIMIT} 封。"
-        FIXED_COUNT=$((FIXED_COUNT + 1))
-        CHECK_EDM_SECRETS="true"
-        SAVED_EDM_STATUS="已啟用 Cloud Scheduler（前 3 個排程 NT\$0 + Resend/Brevo 免費層 NT\$0）"
-        SAVED_EDM_MAX_NTD=0
-        add_stage_log "| 細項 2-5 | [選配] 排程自動發送 EDM (Cloud Scheduler) | 🔧 本次已選配啟用 |"
       else
         echo "✅ [非必要選配，跳過] 暫不啟用 Cloud Scheduler 自動排程發信。"
         SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
@@ -939,6 +1078,8 @@ if should_run_item 8; then
       fi
     else
       SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
+      SAVED_EDM_STATUS="未啟用（維持人工操作，NT\$0）"
+      SAVED_EDM_MAX_NTD=0
       add_stage_log "| 細項 2-5 | [選配] 排程自動發送 EDM (Cloud Scheduler) | ⏭️ 未啟用 |"
     fi
   fi
@@ -952,14 +1093,22 @@ if should_run_item 8; then
       elif [ "$MODE" = "interactive" ]; then
         read -r -p "👉 [可選細項] 是否順便於 Secret Manager 建立選配之 ${EDM_SEC}？[y/N]: " create_edm_sec
         if [[ "$create_edm_sec" =~ ^[Yy]$ ]]; then
-          gcloud services enable secretmanager.googleapis.com --project="$PROJECT_ID"
+          if ! gcloud services enable secretmanager.googleapis.com --project="$PROJECT_ID"; then
+            echo "❌ 啟用 Secret Manager API 失敗，沒有建立 ${EDM_SEC}。"
+            MANUAL_TODO_LIST+=("細項 2-5 [建立 ${EDM_SEC}]：啟用 Secret Manager API 失敗，請於 https://console.cloud.google.com/security/secret-manager?project=${PROJECT_ID} 手動處理。")
+            continue
+          fi
           read -r -s -p "請貼上 ${EDM_SEC} 的值（輸入時不顯示明文，按 Enter 結束）: " edm_sec_val
           echo ""
-          if [ -n "$edm_sec_val" ]; then
-            printf "%s" "$edm_sec_val" | gcloud secrets create "$EDM_SEC" --data-file=- --project="$PROJECT_ID"
+          if [ -z "$edm_sec_val" ]; then
+            echo "⏭️  沒有輸入值，不建立 ${EDM_SEC}。"
+          elif printf "%s" "$edm_sec_val" | gcloud secrets create "$EDM_SEC" --data-file=- --project="$PROJECT_ID"; then
             echo "✅ 已建立 EDM 密鑰 ${EDM_SEC}！"
             FIXED_COUNT=$((FIXED_COUNT + 1))
             SAVED_SECRET_COUNT=$((SAVED_SECRET_COUNT + 1))
+          else
+            echo "❌ 建立 EDM 密鑰 ${EDM_SEC} 失敗，沒有計入。"
+            MANUAL_TODO_LIST+=("細項 2-5 [建立 ${EDM_SEC}]：腳本建立失敗，請於 https://console.cloud.google.com/security/secret-manager?project=${PROJECT_ID} 手動建立。")
           fi
         fi
       fi
@@ -987,8 +1136,9 @@ AI_CAP_MONTHLY_MAX_NTD=$(( (API_QUOTA_RPD * 30 * 10) / 1000 ))
 
 TOTAL_NORMAL_MIN_NTD=$(( SAVED_DB_MIN_NTD + AI_DAILY_NORMAL_MIN_NTD ))
 TOTAL_NORMAL_MAX_NTD=$(( SAVED_DB_MAX_NTD + AI_DAILY_NORMAL_MAX_NTD ))
+CLOUD_RUN_CAP_MAX_NTD=50
 TOTAL_CAP_MIN_NTD=$(( SAVED_DB_MIN_NTD + AI_CAP_MONTHLY_MIN_NTD + SAVED_EDM_MAX_NTD ))
-TOTAL_CAP_MAX_NTD=$(( SAVED_DB_MAX_NTD + AI_CAP_MONTHLY_MAX_NTD + SAVED_EDM_MAX_NTD ))
+TOTAL_CAP_MAX_NTD=$(( SAVED_DB_MAX_NTD + AI_CAP_MONTHLY_MAX_NTD + SAVED_EDM_MAX_NTD + CLOUD_RUN_CAP_MAX_NTD ))
 
 if [ "$TOTAL_NORMAL_MAX_NTD" -le "$BUDGET_MONTHLY_NTD" ]; then
   BUDGET_VERDICT="✅ 安全合規（日常預估總月費 NT\$${TOTAL_NORMAL_MIN_NTD}～${TOTAL_NORMAL_MAX_NTD} 低於您設定的每月預算警示上限 NT\$${BUDGET_MONTHLY_NTD}）"
@@ -1019,6 +1169,9 @@ echo "==========================================================================
 # ------------------------------------------------------------------------------
 # 儲存狀態並自動輸出「單次階段執行報告」與「全部執行累計總報告」
 # ------------------------------------------------------------------------------
+if [ "$MODE" = "dry-run" ]; then
+  echo "ℹ️  [模擬模式] 不寫入狀態檔 ${STATE_FILE}（模擬值不留到下一次執行）。"
+else
 cat > "$STATE_FILE" <<EOF
 STAGE1_LAST_RUN="${STAGE1_LAST_RUN}"
 STAGE1_SUMMARY="${STAGE1_SUMMARY}"
@@ -1038,7 +1191,9 @@ SAVED_API_QUOTA_RPD=${API_QUOTA_RPD}
 SAVED_PROJECT_ID="${PROJECT_ID}"
 SAVED_CLOUD_RUN_SERVICE="${CLOUD_RUN_SERVICE}"
 SAVED_CLOUD_RUN_URL="${CLOUD_RUN_URL}"
+SAVED_SOURCE_DIR="${SAVED_SOURCE_DIR}"
 EOF
+fi
 
 TIMESTAMP="$(date '+%Y%m%d-%H%M%S')"
 HUMAN_TIME="$(date '+%Y-%m-%d %H:%M:%S')"

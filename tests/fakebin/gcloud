@@ -2,6 +2,8 @@
 # 假 gcloud：依參數回固定輸出，並把每次呼叫記到 FAKE_GCLOUD_LOG
 echo "$*" >> "${FAKE_GCLOUD_LOG:-/dev/null}"
 args="$*"
+# FAKE_GCLOUD_FAIL=<片段>：參數含這段字的呼叫一律失敗（測「gcloud 失敗不計入已完成」）
+[ -n "${FAKE_GCLOUD_FAIL:-}" ] && [[ "$args" == *"$FAKE_GCLOUD_FAIL"* ]] && exit 1
 case "$args" in
   "config get-value project"*) echo "${FAKE_DEFAULT_PROJECT:-(unset)}" ;;
   "projects list"*)
@@ -16,6 +18,14 @@ case "$args" in
     printf "b-old\tproj-a_cloudbuild\tsource/old.tgz\tadmin-web\nb-new\tproj-a_cloudbuild\tsource/art.tgz\tart-web\n" ;;
   "storage cp gs://proj-a_cloudbuild/source/art.tgz "*)
     [ -n "${FAKE_SOURCE_TGZ:-}" ] && cp "$FAKE_SOURCE_TGZ" "$4" || exit 1 ;;
+  "sql instances list"*"--project=proj-a"*) echo "db-1" ;;
+  "sql instances describe"*"ipv4Enabled"*) echo "${FAKE_SQL_IPV4:-False}" ;;
+  "sql instances describe"*"requireSsl"*) echo "True" ;;
+  "sql instances describe"*"backupConfiguration"*) echo "True" ;;
+  "sql instances describe"*"settings.tier"*) echo "db-f1-micro" ;;
+  "sql instances describe"*"activationPolicy"*) echo "ALWAYS" ;;
+  "sql instances describe"*"privateNetwork"*) echo "${FAKE_SQL_PRIVATE:-}" ;;
+  "secrets describe"*) [ "${FAKE_SECRETS_MISSING:-0}" = "1" ] && exit 1 ;;
   *) : ;;
 esac
 exit 0

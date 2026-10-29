@@ -10,7 +10,7 @@
 - [ ] **【待確認】真實推薦端點的路徑與格式**：段 B2 的 `--url` 測試假設 `POST /api/recommend`、送 JSON（含虛構庫存 `inventory`）、回 `{ recommendations, cc_list, blocked, message }`。真實系統（AI Studio Build 產生的 Next.js）的推薦端點路徑、要不要登入、回傳格式都未知；拋棄式專案驗收或拿到原始碼時查清楚，不同就調 `askOnline` 或用 `--api-path`。
 - [ ] **【真雲端驗收】用拋棄式 GCP 專案跑一輪（見 D7 第 ③ 層）**：上面三項與審閱都做完後，使用者用個人帳號建一個新 GCP 專案（不放公司資料）、部署 hello-world Cloud Run，照 `AGENT_SETUP` 從第一階段跑到第三階段，跑完關閉專案（估 NT$0～50）。
 - [ ] **【審閱修改】段 C 第 2 件審閱（13 份、Sonnet）發現的待改項，使用者 2026-10-29 確認「照建議改」**（完整發現與材料：`C:\Users\87094024\.ai-companion\review\20261029-art-collector-reviewB\findings.md`，這台本機、不同步；下面是濃縮版）。改完要跑 `bash tests/test-gcp-setup.sh`、`bash tests/test-code-audit.sh`、`node lazy-pack/code-and-ai-audit.mjs --self-test`，並把 `AGENTS.md` 的項數（現 25／166）同步；改完最多再審一輪，只看會讓程式出錯的點。
-  - **`lazy-pack/gcp-setup-and-check.sh`**
+  - **`lazy-pack/gcp-setup-and-check.sh`**（✅ 6 組已改完、測試 65 項全過；測試檔的部分在這組一併做完）
     1. 參數解析：`--stage`／`--item`／`--project` 缺值或後面接選項就 `exit 2`；加 `*)` 分支擋未知選項；`--item` 驗證 1～8。
     2. 狀態檔：讀寫補 `SAVED_SOURCE_DIR`（不然整檔覆蓋會丟掉）；`SAVED_SECRET_COUNT`／`SAVED_DB_MIN_NTD`／`SAVED_DB_MAX_NTD`／`SAVED_EDM_MAX_NTD` 讀入時驗 `^[0-9]+$`；`--dry-run` 不寫狀態檔（第 1022 行 `cat > "$STATE_FILE"` 前沒有 MODE 判斷，`--check-only` 照寫）。
     3. gcloud 結果如實回報：加 Owner、`secrets create`、`services enable`、`sql instances patch`（2-2a/b/c 與方案 2～6）、Vertex 授權，都改成 `if` 判斷，失敗不計數、不寫「已完成」；加 Owner 前驗信箱格式並回顯再按 y。
