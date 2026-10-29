@@ -9,6 +9,10 @@ case "$args" in
   "projects list"*)
     [ "${FAKE_NO_PROJECTS:-0}" = "1" ] && exit 0
     printf "proj-a\t藏家推薦假專案\nproj-b\t練習假專案\nproj-c\t\n" ;;
+  "services list"*"aiplatform.googleapis.com"*) [ "${FAKE_VERTEX_API:-0}" = "1" ] && echo "aiplatform.googleapis.com" ;;
+  "services list"*"cloudscheduler.googleapis.com"*) [ "${FAKE_SCHEDULER_API:-0}" = "1" ] && echo "cloudscheduler.googleapis.com" ;;
+  "projects describe"*) echo "123456" ;;
+  "projects get-iam-policy"*) [ "${FAKE_VERTEX_ROLE:-0}" = "1" ] && echo "roles/aiplatform.user" ;;
   "services list"*"--project=proj-a"*) echo "run.googleapis.com" ;;
   "services list"*"--project=proj-c"*) echo "run.googleapis.com" ;;
   "run services list"*"--project=proj-a"*)

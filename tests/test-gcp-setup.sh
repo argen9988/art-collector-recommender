@@ -166,5 +166,29 @@ chk t12 "已經是 db-g1-small，沒有變更"
 nochk t12 "已選方案 3A"
 grep -q "sql instances patch" "$S/log12.txt" && { fail=$((fail+1)); echo "FAIL [t12] 已是 db-g1-small 卻呼叫了 patch"; } || pass=$((pass+1))
 
+# 13. 單獨重跑細項 8，Secret 密鑰數不能越加越大（EDM 兩組各只算一次）
+rm -f "$ST"
+FAKE_SCHEDULER_API=1 bash "$SH" --item 8 --project proj-a < /dev/null > "$S/out.txt" 2>&1; rc=$?
+rc_is t13a "$rc" 0
+chkst t13a "SAVED_SECRET_COUNT=4"
+FAKE_SCHEDULER_API=1 bash "$SH" --item 8 --project proj-a < /dev/null > "$S/out.txt" 2>&1
+chkst t13b "SAVED_SECRET_COUNT=4"
+FAKE_SCHEDULER_API=1 bash "$SH" --item 8 --project proj-a < /dev/null > "$S/out.txt" 2>&1
+nochkst t13c "SAVED_SECRET_COUNT=8"
+chkst t13c "SAVED_SECRET_COUNT=4"
+
+# 14. Vertex API 已啟用但服務帳戶沒有 roles/aiplatform.user → 不能判成已啟用
+rm -f "$ST"
+FAKE_VERTEX_API=1 bash "$SH" --item 7 --project proj-a < /dev/null > "$S/out.txt" 2>&1; rc=$?
+rc_is t14a "$rc" 0
+chk t14a "服務帳戶還沒有 roles/aiplatform.user"
+nochk t14a "專案已啟用 Vertex AI API"
+chkst t14a "授權未完成"
+# 14b. 有授權才判成已啟用
+rm -f "$ST"
+FAKE_VERTEX_API=1 FAKE_VERTEX_ROLE=1 bash "$SH" --item 7 --project proj-a < /dev/null > "$S/out.txt" 2>&1
+chk t14b "專案已啟用 Vertex AI API"
+nochk t14b "服務帳戶還沒有 roles/aiplatform.user"
+
 echo "PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]

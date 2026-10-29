@@ -162,6 +162,7 @@ SAVED_VERTEX_STATUS="未啟用（維持 AI Studio Paid Tier，NT$0 底租）"
 SAVED_EDM_STATUS="未啟用（維持人工操作或免費額度內 NT$0）"
 SAVED_EDM_MAX_NTD=0
 SAVED_SECRET_COUNT=2
+SAVED_EDM_SECRET_COUNT=0
 SAVED_SOURCE_DIR=""
 
 if [ -f "$STATE_FILE" ]; then
@@ -183,6 +184,7 @@ if [ -f "$STATE_FILE" ]; then
       SAVED_EDM_STATUS)      SAVED_EDM_STATUS="$s_val" ;;
       SAVED_EDM_MAX_NTD)     [[ "$s_val" =~ ^[0-9]+$ ]] && SAVED_EDM_MAX_NTD="$s_val" ;;
       SAVED_SECRET_COUNT)    [[ "$s_val" =~ ^[0-9]+$ ]] && SAVED_SECRET_COUNT="$s_val" ;;
+      SAVED_EDM_SECRET_COUNT) [[ "$s_val" =~ ^[0-9]+$ ]] && SAVED_EDM_SECRET_COUNT="$s_val" ;;
       SAVED_SOURCE_DIR)      SAVED_SOURCE_DIR="$s_val" ;;
     esac
   done < "$STATE_FILE"
@@ -679,6 +681,7 @@ if should_run_item 4; then
     fi
   done
   SAVED_SECRET_COUNT="$FOUND_SECRETS"
+  SAVED_EDM_SECRET_COUNT=0
 fi
 
 # ------------------------------------------------------------------------------
@@ -963,6 +966,13 @@ if should_run_item 7; then
   else
     if gcloud services list --enabled --project="$PROJECT_ID" --filter="config.name:aiplatform.googleapis.com" --format="value(config.name)" 2>/dev/null | grep -q "aiplatform.googleapis.com"; then
       VERTEX_ENABLED="true"
+      PROJECT_NUM="$(gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)" 2>/dev/null || true)"
+      if [ -n "$PROJECT_NUM" ] && ! gcloud projects get-iam-policy "$PROJECT_ID" \
+        --flatten="bindings[].members" \
+        --filter="bindings.role:roles/aiplatform.user AND bindings.members:serviceAccount:${PROJECT_NUM}-compute@developer.gserviceaccount.com" \
+        --format="value(bindings.role)" 2>/dev/null | grep -q "roles/aiplatform.user"; then
+        VERTEX_ENABLED="no-role"
+      fi
     fi
   fi
 
@@ -971,6 +981,11 @@ if should_run_item 7; then
     SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
     SAVED_VERTEX_STATUS="已啟用 Vertex AI API（依實際呼叫字數計費，無底租）"
     add_stage_log "| 細項 2-4 | [選配] 啟用 Vertex AI API | ✅ 已啟用 |"
+  elif [ "$VERTEX_ENABLED" = "no-role" ]; then
+    echo "⚠️ Vertex AI API 已啟用，但 Cloud Run 服務帳戶還沒有 roles/aiplatform.user，Cloud Run 還不能呼叫。"
+    MANUAL_TODO_LIST+=("細項 2-4 [Vertex AI 授權]：API 已啟用但服務帳戶缺 Vertex AI 使用者角色，請於 https://console.cloud.google.com/iam-admin/iam?project=${PROJECT_ID} 補上，或重跑 --item 7 選 [2]。")
+    SAVED_VERTEX_STATUS="已啟用 Vertex AI API（授權未完成，依實際呼叫字數計費，無底租）"
+    add_stage_log "| 細項 2-4 | [選配] 啟用 Vertex AI API | ⚠️ API 已啟用，授權未完成，需手動處理 |"
   else
     if [ "$MODE" = "interactive" ] || [ "$MODE" = "dry-run" ]; then
       echo "   [1] 維持 Google AI Studio（Paid Tier 付費層）＋ Secret Manager 金鑰隔離（預設推薦，直接跳過）"
@@ -1099,11 +1114,16 @@ if should_run_item 8; then
   fi
 
   if [ "$CHECK_EDM_SECRETS" = "true" ]; then
+    # 重跑時先扣掉上次記下的 EDM 密鑰數再重算，避免單獨重跑細項 8 時越加越大
+    SAVED_SECRET_COUNT=$((SAVED_SECRET_COUNT - SAVED_EDM_SECRET_COUNT))
+    [ "$SAVED_SECRET_COUNT" -lt 0 ] && SAVED_SECRET_COUNT=0
+    SAVED_EDM_SECRET_COUNT=0
     for EDM_SEC in "EDM_API_KEY" "CRON_SECRET"; do
       if [ "$MODE" != "dry-run" ] && gcloud secrets describe "$EDM_SEC" --project="$PROJECT_ID" >/dev/null 2>&1; then
         echo "✅ [已存在，自動跳過] Secret Manager 中已存在 EDM 密鑰：${EDM_SEC}"
         SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
         SAVED_SECRET_COUNT=$((SAVED_SECRET_COUNT + 1))
+        SAVED_EDM_SECRET_COUNT=$((SAVED_EDM_SECRET_COUNT + 1))
       elif [ "$MODE" = "interactive" ]; then
         read -r -p "👉 [可選細項] 是否順便於 Secret Manager 建立選配之 ${EDM_SEC}？[y/N]: " create_edm_sec
         if [[ "$create_edm_sec" =~ ^[Yy]$ ]]; then
@@ -1120,6 +1140,7 @@ if should_run_item 8; then
             echo "✅ 已建立 EDM 密鑰 ${EDM_SEC}！"
             FIXED_COUNT=$((FIXED_COUNT + 1))
             SAVED_SECRET_COUNT=$((SAVED_SECRET_COUNT + 1))
+            SAVED_EDM_SECRET_COUNT=$((SAVED_EDM_SECRET_COUNT + 1))
           else
             echo "❌ 建立 EDM 密鑰 ${EDM_SEC} 失敗，沒有計入。"
             MANUAL_TODO_LIST+=("細項 2-5 [建立 ${EDM_SEC}]：腳本建立失敗，請於 https://console.cloud.google.com/security/secret-manager?project=${PROJECT_ID} 手動建立。")
@@ -1200,6 +1221,7 @@ SAVED_VERTEX_STATUS="${SAVED_VERTEX_STATUS}"
 SAVED_EDM_STATUS="${SAVED_EDM_STATUS}"
 SAVED_EDM_MAX_NTD=${SAVED_EDM_MAX_NTD}
 SAVED_SECRET_COUNT=${SAVED_SECRET_COUNT}
+SAVED_EDM_SECRET_COUNT=${SAVED_EDM_SECRET_COUNT}
 SAVED_BUDGET_MONTHLY_NTD=${BUDGET_MONTHLY_NTD}
 SAVED_API_QUOTA_RPD=${API_QUOTA_RPD}
 SAVED_PROJECT_ID="${PROJECT_ID}"

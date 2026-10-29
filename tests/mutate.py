@@ -18,6 +18,8 @@ M = {
  'M10': ('lazy-pack/gcp-setup-and-check.sh', '[ -t 0 ] || PROJECT_AUTO_PICK="true"', ':', 'gcp', 't5b'),
  'M11': ('lazy-pack/gcp-setup-and-check.sh', 'if [ "$#" -eq 0 ] && [ "$MODE" != "dry-run" ]; then\n              echo "⏭️  [已符合', 'if false; then\n              echo "⏭️  [已符合', 'gcp', '無（沒有測資走到已是 g1-small 的 3A）'),
  'M12': ('lazy-pack/gcp-setup-and-check.sh', 'if [ "$PRIVATE_NETWORK" = "Unknown" ]; then', 'if false; then', 'gcp', '無（沒有 describe 失敗的私有網路測資）'),
+ 'M13': ('lazy-pack/gcp-setup-and-check.sh', 'SAVED_SECRET_COUNT=$((SAVED_SECRET_COUNT - SAVED_EDM_SECRET_COUNT))', 'SAVED_SECRET_COUNT=$((SAVED_SECRET_COUNT - 0))', 'gcp', 't13b t13c'),
+ 'M14': ('lazy-pack/gcp-setup-and-check.sh', 'VERTEX_ENABLED="no-role"', 'VERTEX_ENABLED="true"', 'gcp', 't14a'),
 }
 
 
