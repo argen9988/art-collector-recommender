@@ -4,7 +4,7 @@
 
 ## 下一步
 
-1. 將評估報告信件（見 `D:\Dev\company\art-collector-recommender\docs\assessment-and-sop.md`「## 附錄：給資訊部長的專案彙報信件草稿」）寄予資訊部長，說明關係企業獨立運作下之六大資安與成本控管規範。建議模型與努力程度：Sonnet（中努力程度，協助核對信件與設定即可）。
+1. 將本機專用之評估報告信件草稿（見 `D:\Dev\company\art-collector-recommender\docs\email-draft-to-director.md`，已列入 `.gitignore` 不上傳 GitHub）寄予資訊部長，說明關係企業獨立運作下之六大資安與成本控管規範。建議模型與努力程度：Sonnet（中努力程度，協助核對信件與設定即可）。
 2. 將公開 GitHub 領航指南網址 `https://raw.githubusercontent.com/argen9988/art-collector-recommender/master/AGENT_SETUP_雲端資安設定與驗收指南.md` 交給執行者的 AI Agent，依序執行第一階段（`--stage 1`）、第二階段（`--stage 2`）與費用精算（`--stage cost`），產出單次報告與 `reports/full-execution-report.md`。建議模型與努力程度：Sonnet（中努力程度，例行腳本執行與結果判讀）。
 3. 待開發者匯出藏家系統原始碼後，執行第三階段 `node D:/Dev/company/art-collector-recommender/lazy-pack/code-and-ai-audit.mjs --target "<藏家系統原始碼路徑>" --run-ai-eval` 進行原始碼金鑰掃描與 20 題 AI 推薦紅隊驗收，更新最終總報告。建議模型與努力程度：主力模型（Opus / Gemini Pro 高努力程度，涉及原始碼漏洞修補與 AI 評測調校）。
 
@@ -36,7 +36,8 @@
 - `D:\Dev\company\art-collector-recommender\config\params.json`：預算、配額、EDM 單日上限與 20 題驗收門檻設定檔
 - `D:\Dev\company\art-collector-recommender\lazy-pack\gcp-setup-and-check.sh`：雲端分階段資安檢查、互動設定與費用精算腳本
 - `D:\Dev\company\art-collector-recommender\lazy-pack\code-and-ai-audit.mjs`：本機原始碼金鑰掃描與 20 題 AI 推薦紅隊測試腳本
-- `D:\Dev\company\art-collector-recommender\docs\assessment-and-sop.md`：專案概況、資安評估、六大規範 SOP 與給部長的信完整報告
+- `D:\Dev\company\art-collector-recommender\docs\assessment-and-sop.md`：專案概況、資安評估與六大規範 SOP 完整報告
+- `D:\Dev\company\art-collector-recommender\docs\email-draft-to-director.md`：給資訊部長的專案彙報信件草稿（僅留本機，已列入 `.gitignore`）
 - `D:\Dev\company\art-collector-recommender\docs\edm-feature-implementation-and-pricing.md`：排程發送客製化 EDM 開發者實作指南與收費標準說明
 - `D:\Dev\project-records\company\art-collector-recommender\home.md`：本機真名完整專案紀錄首頁（僅 Windows 公司電腦）
 

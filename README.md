@@ -11,6 +11,14 @@
 > **「請讀這份指南，幫我執行藏家推薦系統的資安設定與檢查！」**
 > `https://raw.githubusercontent.com/argen9988/art-collector-recommender/master/AGENT_SETUP_雲端資安設定與驗收指南.md`
 
+### 🧠 使用各家 AI 工具時，建議選擇的模型（Model）與努力程度（Effort）
+
+| 您要執行的階段／工作 | Claude Code 建議設定 | Antigravity 2 建議設定 | ChatGPT App / Codex 建議設定 | 建議努力程度 (Effort) | 為什麼這樣選？ |
+| :--- | :--- | :--- | :--- | :---: | :--- |
+| **第一階段（立即止血）**<br>**第二階段（架構加固）**<br>**獨立項目（每月費用精算）** | **Claude Sonnet 4.6** | **Gemini Pro / Argon**<br>*(或 Flash)* | **GPT-5 / o4-mini** | **中（Medium）** | 屬於明確的腳本執行、環境檢查與開網頁導引，用中階模型＋中努力程度反應最快、最省額度。 |
+| **第三階段（僅執行驗收腳本與出報告）** | **Claude Sonnet 4.6** | **Gemini Pro / Argon** | **GPT-5 / o4-mini** | **中（Medium）** | 腳本已內建靜態掃描與 20 題自動閱卷邏輯，中努力程度即可穩定跑完。 |
+| **第三階段（若掃出金鑰外洩或 AI 被套話，需請 AI 修改網站原始碼）** | **Claude Opus 4.6** | **Gemini Pro / Argon** | **GPT-5 Pro / o3** | **高（High）** | 涉及前後端程式碼重構與防惡意套話（Prompt Injection）指令調校，需調高為高努力程度以確保修改品質。 |
+
 ### 💬 在互動過程中，您可以怎麼跟這個 Lazy Pack / AI 說話？（白話口令參考）
 
 | 您想做的事 | 您可以直接對 AI 說的白話口令 |
@@ -119,7 +127,7 @@ node lazy-pack/code-and-ai-audit.mjs --target "<藏家系統原始碼路徑>" --
 ## 📚 六、 專案文件導覽
 
 - **[`AGENT_SETUP_雲端資安設定與驗收指南.md`](./AGENT_SETUP_雲端資安設定與驗收指南.md)**：給所有 AI Agent 讀的自動化代操領航指南（含 10 個細項白話說明卡）。
-- **[`docs/assessment-and-sop.md`](./docs/assessment-and-sop.md)**：完整雲端資安評估報告、六大規範 SOP 與給資訊部長的專案彙報信件草稿。
+- **[`docs/assessment-and-sop.md`](./docs/assessment-and-sop.md)**：完整雲端資安評估報告與六大規範 SOP。
 - **[`docs/edm-feature-implementation-and-pricing.md`](./docs/edm-feature-implementation-and-pricing.md)**：排程以人推畫／以畫推人發送客製化 EDM 開發者實作指南與收費標準說明。
 - **[`config/params.json`](./config/params.json)**：可調參數檔（預算上限、API 配額、備份天數、20 題驗收門檻與 `_說明`）。
 - **[`AGENTS.md`](./AGENTS.md)**：專案架構與開發規範說明。

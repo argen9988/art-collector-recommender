@@ -2,10 +2,18 @@
 
 > **適用對象**：**任何 AI Agent**，特別針對桌面版與工程 Agent 校準：**Claude Code／ChatGPT App（含 Codex）／Antigravity 2／Cursor／OpenCode**。
 > **使用方式（給人類讀者，完全不需資訊背景）**：
-> 1. 打開你電腦上的任何一款 AI 工具（Claude、ChatGPT、Antigravity 等）。
+> 1. 打開你電腦上的任何一款 AI 工具（Claude、ChatGPT、Antigravity 等），依下方建議表選擇對應的模型（Model）與努力程度（Effort）。
 > 2. 直接把這個檔案（或下列 GitHub Raw 網址）貼給你的 AI，對它說一句話：
 >    **「請讀這份指南，幫我執行藏家推薦系統的資安設定與檢查！」**
 >    `https://raw.githubusercontent.com/argen9988/art-collector-recommender/master/AGENT_SETUP_雲端資安設定與驗收指南.md`
+
+### 🧠 給人類讀者的「AI 工具、建議模型（Model）與努力程度（Effort）」選擇表
+
+| 你要執行的階段／工作 | Claude Code 建議設定 | Antigravity 2 建議設定 | ChatGPT App / Codex 建議設定 | 建議努力程度 (Effort) | 為什麼這樣選？ |
+| :--- | :--- | :--- | :--- | :---: | :--- |
+| **第一階段（立即止血）**<br>**第二階段（架構加固）**<br>**獨立項目（每月費用精算）** | **Claude Sonnet 4.6** | **Gemini Pro / Argon**<br>*(或 Flash)* | **GPT-5 / o4-mini** | **中（Medium）** | 屬於明確的腳本執行、環境檢查與開網頁導引，用中階模型＋中努力程度反應最快、最省額度。 |
+| **第三階段（僅執行驗收腳本與出報告）** | **Claude Sonnet 4.6** | **Gemini Pro / Argon** | **GPT-5 / o4-mini** | **中（Medium）** | 腳本已內建靜態掃描與 20 題自動閱卷邏輯，中努力程度即可穩定跑完。 |
+| **第三階段（若掃出金鑰外洩或 AI 被套話，需請 AI 修改網站原始碼）** | **Claude Opus 4.6** | **Gemini Pro / Argon** | **GPT-5 Pro / o3** | **高（High）** | 涉及前後端程式碼重構與防惡意套話（Prompt Injection）指令調校，需調高為高努力程度以確保修改品質。 |
 
 ---
 

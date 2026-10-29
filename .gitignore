@@ -13,7 +13,8 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# 驗收測試產出之暫存報表（含真實系統輸出者不入版控，留存於執行者本機 reports/）
+# 驗收測試產出之暫存報表與內部信件草稿（不入版控，僅留存於本機）
 reports/
+docs/email-draft-to-director.md
 lazy-pack/reports/*.json
 lazy-pack/reports/*.log

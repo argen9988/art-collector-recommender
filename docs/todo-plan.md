@@ -6,7 +6,6 @@
 
 ## 第一階段：立即止血與基礎防護（對應 `gcp-setup-and-check.sh --stage 1`）
 
-- [ ] **寄發評估報告信件予資訊部長**：使用 [`docs/assessment-and-sop.md`](./assessment-and-sop.md) 附錄草稿向部長彙報輕量化自管規範、雙重止損與三階段自動化懶人包方案。
 - [ ] **【細項 1-1】確認 GCP 專案綁定 Billing（切換 Paid Tier）**：確認專案處於 `Pay-as-you-go`，保障藏家資料 100% 不被用於模型訓練。
 - [ ] **【細項 1-2】設定雙管理員（Owner）帳號共管**：將部門公務專用 Gmail 與主管 Gmail 共同設為專案 `Owner`（至少 2 人互為備援）。
 - [ ] **【細項 1-3】設定軟硬雙重成本止損與同仁 Gmail 白名單**：透過互動問答決定並於 GCP 設定每月預算提醒鈴（預設 NT$1,000）、鎖定 Gemini API 每日呼叫硬上限（預設 1,000 次/日），並於 OAuth consent screen (`Testing` 模式) 加入部門同仁 `@gmail.com` 白名單。

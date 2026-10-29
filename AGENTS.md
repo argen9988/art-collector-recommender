@@ -28,9 +28,9 @@ art-collector-recommender/
 ├── lazy-pack/
 │   ├── gcp-setup-and-check.sh           # 雲端 GCP 分階段資安檢查、互動設定與費用精算腳本
 │   └── code-and-ai-audit.mjs            # 本機原始碼金鑰掃描與 AI 推薦品質驗收腳本
-├── reports/                             # 自動輸出之單次階段報告与全部階段執行累計總報告（不入版控）
+├── reports/                             # 自動輸出之單次階段報告與全部階段執行累計總報告（不入版控）
 └── docs/
-    ├── assessment-and-sop.md                     # 專案概況、六大資安規範 SOP 與部長信件完整報告
+    ├── assessment-and-sop.md                     # 專案概況與六大資安規範 SOP 完整報告
     ├── edm-feature-implementation-and-pricing.md # 排程發送客製化 EDM 開發者實作指南與收費標準說明
     ├── todo-plan.md                              # 待辦清單（只留未完成項目）
     ├── worklog/                                  # 施工紀錄（分月存）
