@@ -7,10 +7,9 @@
 ## 零、 Lazy Pack 工具包補強與審閱待辦（下次開工優先執行）
 
 - [ ] **【工具補強】新增「自動定位藏家推薦系統目標（雲端專案選單＋原始碼三來源自動抓取＋線上網址實測）」**（2026-10-29 確認）：
-  1. **第三階段原始碼三種來源自動定位與防呆（修改 `lazy-pack/code-and-ai-audit.mjs` 與 `AGENT_SETUP_雲端資安設定與驗收指南.md`）**：移除未傳 `--target` 時預設掃描 Lazy Pack 自身目錄之盲點，改為互動選單與 AI Agent 自動代操三種來源：(A) 程式碼仍在雲端時，由 AI Agent 透過 `gcloud run services describe` / Cloud Build Source 自動下載或引導從 Google AI Studio 點選 Download ZIP / 匯出 GitHub；(B) 貼入 GitHub 網址自動 `git clone`；(C) 自動搜尋本機 `Downloads`/`Desktop` 專案資料夾供使用者點選。
   2. **支援線上 Cloud Run 網址 / API 端點實測（修改 `lazy-pack/code-and-ai-audit.mjs`）**：支援帶入 `--url "<Cloud Run 網址>"`（或從第一階段自動探測之網址讀取），以 20 題假資料對真實線上推薦端點進行紅隊驗收；未帶 `--url` 時讀 `reports/.lazy-pack-state.env` 的 `SAVED_CLOUD_RUN_URL`（`gcp-setup-and-check.sh` 已會寫入）。
-  3. **補齊第三階段的離線自動測試（見 D7 第 ② 層）**：在 `tests/` 新增埋了假 `AIza` 金鑰的假 Next.js 專案（給金鑰掃描與 `--target` 防呆用）與假的推薦 API 小伺服器（給 `--url` 測試打），寫成 `tests/test-code-audit.sh` 之類的一支測試，並用故意改壞的複本確認測得出來。
-  4. **同步文件**：`AGENT_SETUP_雲端資安設定與驗收指南.md`、`README.md` 補 `--project`、專案選單、`--url` 與三種原始碼來源的說明。
+  3. **補齊第三階段 `--url` 的離線自動測試（見 D7 第 ② 層）**：在 `tests/` 新增假的推薦 API 小伺服器給 `--url` 測試打，併入 `tests/test-code-audit.sh`，並用故意改壞的複本確認測得出來（假 Next.js 專案與 `--target` 三種來源的測試已完成，見施工紀錄 2026-10-29 段 B1）。
+  4. **同步文件**：`AGENT_SETUP_雲端資安設定與驗收指南.md`、`README.md` 補 `--project`、專案選單、`--url` 與三種原始碼來源的說明（`AGENT_SETUP` 第 74、198 行與 `README.md` 第 122 行的指令要改成可不帶 `--target`、說明選單與 `--source`／`--repo`）。
 - [ ] **【真雲端驗收】用拋棄式 GCP 專案跑一輪（見 D7 第 ③ 層）**：上面三項與審閱都做完後，使用者用個人帳號建一個新 GCP 專案（不放公司資料）、部署 hello-world Cloud Run，照 `AGENT_SETUP` 從第一階段跑到第三階段，跑完關閉專案（估 NT$0～50）。
 - [ ] **【收尾審閱】執行 `review-changes` 審閱**：待上述自動定位機制實作完成後，一併對 `2643155..HEAD` 執行 `review-changes` 完整審閱。
 

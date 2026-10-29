@@ -1,0 +1,7 @@
+{
+  "name": "fake-art-collector-web",
+  "private": true,
+  "description": "測試用假 Next.js 專案（內容全為虛構，不含任何金鑰）",
+  "scripts": { "dev": "next dev" },
+  "dependencies": { "next": "15.0.0", "@google/genai": "1.0.0" }
+}

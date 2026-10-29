@@ -12,6 +12,10 @@ case "$args" in
   "run services list"*"--project=proj-a"*)
     printf "art-web\thttps://art-web-fake.a.run.app\nadmin-web\thttps://admin-web-fake.a.run.app\n" ;;
   "run services list"*"--project=proj-c"*) : ;;
+  "builds list"*"--project=proj-a"*)
+    printf "b-old\tproj-a_cloudbuild\tsource/old.tgz\tadmin-web\nb-new\tproj-a_cloudbuild\tsource/art.tgz\tart-web\n" ;;
+  "storage cp gs://proj-a_cloudbuild/source/art.tgz "*)
+    [ -n "${FAKE_SOURCE_TGZ:-}" ] && cp "$FAKE_SOURCE_TGZ" "$4" || exit 1 ;;
   *) : ;;
 esac
 exit 0

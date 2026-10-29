@@ -12,14 +12,24 @@
  * 6. 每次執行自動輸出「單次階段執行報告 (reports/stage-3-report-<時間>.md)」並更新「全部執行總報告 (reports/full-execution-report.md)」。
  *
  * 用法：
- *   node lazy-pack/code-and-ai-audit.mjs --self-test
+ *   node lazy-pack/code-and-ai-audit.mjs --self-test                                      # 掃描 tests/fixtures 的乾淨假專案
+ *   node lazy-pack/code-and-ai-audit.mjs                                                  # 沒帶 --target：出「原始碼從哪裡來」選單
  *   node lazy-pack/code-and-ai-audit.mjs --target "<藏家系統原始碼目錄>"                  # 僅跑細項 3-1 原始碼掃描
- *   node lazy-pack/code-and-ai-audit.mjs --target "<藏家系統原始碼目錄>" --eval-only       # 僅跑細項 3-2 AI 20 題測試
  *   node lazy-pack/code-and-ai-audit.mjs --target "<藏家系統原始碼目錄>" --run-ai-eval     # 細項 3-1 + 3-2 全跑
+ *   node lazy-pack/code-and-ai-audit.mjs --eval-only                                      # 僅跑細項 3-2 AI 20 題測試（不需原始碼）
+ *   node lazy-pack/code-and-ai-audit.mjs --source cloud|github|local [--repo "<GitHub 網址>"]  # 不出選單，直接指定來源
+ *
+ * 原始碼三種來源（沒帶 --target 時）：
+ *   [A] cloud ：程式碼還在雲端 → 從第一階段記下的專案找 Cloud Build 上傳的原始碼下載；找不到就引導從 Google AI Studio 下載 ZIP／匯出 GitHub
+ *   [B] github：貼 GitHub 網址 → git clone 到 reports/sources/
+ *   [C] local ：搜尋本機「下載」「桌面」裡的專案資料夾與 ZIP（LAZY_PACK_SEARCH_DIRS 可改搜尋位置，以系統路徑分隔字元隔開）
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import readline from 'node:readline/promises';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -27,6 +37,8 @@ const __dirname = path.dirname(__filename);
 const REPO_ROOT = path.resolve(__dirname, '..');
 const REPORTS_DIR = path.join(REPO_ROOT, 'reports');
 const STATE_FILE = path.join(REPORTS_DIR, '.lazy-pack-state.env');
+const SOURCES_DIR = process.env.LAZY_PACK_SOURCES_DIR || path.join(REPORTS_DIR, 'sources'); // 測試時指到暫存資料夾
+const SELF_TEST_TARGET = path.join(REPO_ROOT, 'tests', 'fixtures', 'fake-nextjs-app');
 
 // -----------------------------------------------------------------------------
 // 1. 讀取與驗證參數檔 (config/params.json)
@@ -316,7 +328,7 @@ function parseEnvState(filePath) {
   return state;
 }
 
-function writeReports(params, runScan, runEval, codeResult, aiResult) {
+function writeReports(params, runScan, runEval, codeResult, aiResult, targetDir) {
   fs.mkdirSync(REPORTS_DIR, { recursive: true });
   const now = new Date();
   const pad = (n) => String(n).padStart(2, '0');
@@ -354,23 +366,18 @@ function writeReports(params, runScan, runEval, codeResult, aiResult) {
   state.STAGE3_LAST_RUN = humanTime;
   state.STAGE3_SUMMARY = `3-1 程式碼掃描：${scanStatus} ｜ 3-2 AI 紅隊測試：${evalStatus}`;
 
-  const envContent = [
-    `STAGE1_LAST_RUN="${state.STAGE1_LAST_RUN}"`,
-    `STAGE1_SUMMARY="${state.STAGE1_SUMMARY}"`,
-    `STAGE2_LAST_RUN="${state.STAGE2_LAST_RUN}"`,
-    `STAGE2_SUMMARY="${state.STAGE2_SUMMARY}"`,
-    `STAGE3_LAST_RUN="${state.STAGE3_LAST_RUN}"`,
-    `STAGE3_SUMMARY="${state.STAGE3_SUMMARY}"`,
-    `SAVED_DB_CHOICE_LABEL="${state.SAVED_DB_CHOICE_LABEL}"`,
-    `SAVED_DB_MIN_NTD=${dbMin}`,
-    `SAVED_DB_MAX_NTD=${dbMax}`,
-    `SAVED_VERTEX_STATUS="${state.SAVED_VERTEX_STATUS}"`,
-    `SAVED_EDM_STATUS="${state.SAVED_EDM_STATUS}"`,
-    `SAVED_EDM_MAX_NTD=${edmMax}`,
-    `SAVED_SECRET_COUNT=${state.SAVED_SECRET_COUNT}`,
-    `SAVED_BUDGET_MONTHLY_NTD=${budgetNtd}`,
-    `SAVED_API_QUOTA_RPD=${quotaRpd}`,
-  ].join('\n') + '\n';
+  Object.assign(state, {
+    SAVED_DB_MIN_NTD: dbMin,
+    SAVED_DB_MAX_NTD: dbMax,
+    SAVED_EDM_MAX_NTD: edmMax,
+    SAVED_BUDGET_MONTHLY_NTD: budgetNtd,
+    SAVED_API_QUOTA_RPD: quotaRpd,
+  });
+  if (runScan && !isSelfTest) state.SAVED_SOURCE_DIR = targetDir;
+  // 整份照原樣寫回，第一階段記下的 SAVED_PROJECT_ID、SAVED_CLOUD_RUN_URL 等欄位不能丟
+  const envContent = Object.entries(state)
+    .map(([k, v]) => (typeof v === 'number' ? `${k}=${v}` : `${k}="${v}"`))
+    .join('\n') + '\n';
   fs.writeFileSync(STATE_FILE, envContent, 'utf-8');
 
   const singleReportPath = path.join(REPORTS_DIR, `stage-3-report-${ts}.md`);
@@ -380,6 +387,7 @@ function writeReports(params, runScan, runEval, codeResult, aiResult) {
     '# 藏家推薦系統 — 單次執行成果紀錄回報（執行階段：第三階段 原始碼與 AI 總體檢）',
     '',
     `- **執行時間**：${humanTime}`,
+    ...(runScan ? [`- **掃描的原始碼資料夾**：${targetDir}`] : []),
     `- **細項 3-1（本機原始碼金鑰外洩掃描）**：${scanStatus}`,
     `- **細項 3-2（${params.eval_question_count} 題 AI 推薦與防套話紅隊測試）**：${evalStatus}`,
     '',
@@ -436,6 +444,233 @@ function writeReports(params, runScan, runEval, codeResult, aiResult) {
 }
 
 // -----------------------------------------------------------------------------
+// 5. 原始碼來源定位與 --target 防呆（沒帶 --target 時不再掃 Lazy Pack 自己）
+// -----------------------------------------------------------------------------
+let pipedAnswers = null;
+async function ask(question) {
+  if (process.stdin.isTTY) {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const answer = await rl.question(question);
+    rl.close();
+    return answer.trim();
+  }
+  // 輸入不是終端機（管線、AI Agent 代跑）：一次讀完，每題取一行；讀完了就當空白
+  if (pipedAnswers === null) {
+    try { pipedAnswers = fs.readFileSync(0, 'utf-8').split(/\r?\n/); } catch { pipedAnswers = []; }
+  }
+  const answer = (pipedAnswers.shift() ?? '').trim();
+  console.log(`${question}${answer}`);
+  return answer;
+}
+
+// Windows 的 gcloud、git 是 .cmd，要經 cmd.exe 才找得到；參數一律加雙引號
+function runCmd(cmd, cmdArgs, opts = {}) {
+  const r = process.platform === 'win32'
+    ? spawnSync([cmd, ...cmdArgs.map((a) => `"${a}"`)].join(' '), { shell: true, encoding: 'utf-8', ...opts })
+    : spawnSync(cmd, cmdArgs, { encoding: 'utf-8', ...opts });
+  return { ok: r.status === 0, stdout: (r.stdout || '').trim(), stderr: (r.stderr || '').trim() };
+}
+
+const samePath = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
+
+// 回傳 { ok, dir, msg, warn }：資料夾要存在、不是 Lazy Pack 自己或它的上層、裡面要有程式碼檔
+function validateTarget(dir) {
+  if (!fs.existsSync(dir)) return { ok: false, msg: `找不到資料夾：${dir}` };
+  if (!fs.statSync(dir).isDirectory()) {
+    const hint = dir.toLowerCase().endsWith('.zip') ? '（這是 ZIP 檔：請改選來源 [C]，會自動解壓縮）' : '';
+    return { ok: false, msg: `這不是資料夾：${dir}${hint}` };
+  }
+  const real = fs.realpathSync(dir);
+  const lazyPack = fs.realpathSync(REPO_ROOT);
+  if (samePath(real, lazyPack) || samePath(lazyPack.slice(0, real.length + 1), real.endsWith(path.sep) ? real : real + path.sep)) {
+    return { ok: false, msg: `這是 Lazy Pack 工具包自己（或它的上層資料夾）：${real}。請指定藏家推薦系統的原始碼資料夾。` };
+  }
+  const fileCount = collectFiles(real).length;
+  if (fileCount === 0) return { ok: false, msg: `這個資料夾裡沒有任何程式碼檔（.ts/.tsx/.js/.json…）：${real}` };
+  const warn = fs.existsSync(path.join(real, 'package.json'))
+    ? ''
+    : '注意：這個資料夾最上層沒有 package.json，看起來不像 Next.js 專案；照樣掃描，請確認選對資料夾。';
+  return { ok: true, dir: real, fileCount, warn };
+}
+
+// ZIP 或雲端原始碼解開後常多包一層資料夾：最上層沒有 package.json、底下剛好一個有的，就往下一層
+function findProjectRoot(dir) {
+  if (fs.existsSync(path.join(dir, 'package.json'))) return dir;
+  const subs = fs.readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && !IGNORE_DIRS.has(e.name) && fs.existsSync(path.join(dir, e.name, 'package.json')));
+  return subs.length === 1 ? path.join(dir, subs[0].name) : dir;
+}
+
+function newSourceDir(name) {
+  const pad = (n) => String(n).padStart(2, '0');
+  const d = new Date();
+  const ts = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  const dest = path.join(SOURCES_DIR, `${name.replace(/[^\w.-]/g, '_')}-${ts}`);
+  fs.mkdirSync(dest, { recursive: true });
+  return dest;
+}
+
+function extractZip(zipPath) {
+  const dest = newSourceDir(path.basename(zipPath, path.extname(zipPath)));
+  const attempts = [
+    ['unzip', ['-q', '-o', zipPath, '-d', dest]],
+    ...(process.platform === 'win32'
+      ? [['powershell', ['-NoProfile', '-Command', `Expand-Archive -LiteralPath '${zipPath}' -DestinationPath '${dest}' -Force`]]]
+      : [['ditto', ['-x', '-k', zipPath, dest]]]),
+  ];
+  for (const [cmd, cmdArgs] of attempts) {
+    if (runCmd(cmd, cmdArgs).ok && collectFiles(dest).length > 0) return findProjectRoot(dest);
+  }
+  console.log(`❌ 解壓縮失敗：${zipPath}（請手動解壓縮後，用 --target 指定解開的資料夾）`);
+  return null;
+}
+
+function printAiStudioGuide() {
+  console.log(' 📥 從 Google AI Studio 把程式碼拿下來（約 1 分鐘，NT$0）：');
+  console.log('   1. 打開 https://aistudio.google.com ，進入藏家推薦系統這個 App（Build 模式）。');
+  console.log('   2. 用畫面上的「下載程式碼（ZIP）」存到「下載」資料夾；或用「匯出到 GitHub」。');
+  console.log('   3. 回來重跑這支腳本：下載 ZIP 的選 [C]（自動解壓縮），匯出 GitHub 的選 [B]。');
+}
+
+// [A] 程式碼還在雲端：用第一階段記下的專案找 Cloud Build 上傳的原始碼（gcloud run deploy --source 會留一份 .tgz）
+function fetchFromCloud(state) {
+  const project = state.SAVED_PROJECT_ID ? String(state.SAVED_PROJECT_ID) : '';
+  const service = state.SAVED_CLOUD_RUN_SERVICE ? String(state.SAVED_CLOUD_RUN_SERVICE) : '';
+  if (!project) {
+    console.log(' ⚠️ 還不知道是哪個 GCP 專案：請先跑 bash lazy-pack/gcp-setup-and-check.sh --stage cost --check-only 選好專案（不改任何設定）。');
+    printAiStudioGuide();
+    return null;
+  }
+  console.log(` ☁️ 到 GCP 專案 ${project} 找 Cloud Build 上傳過的原始碼${service ? `（網站 ${service}）` : ''}…`);
+  const list = runCmd('gcloud', ['builds', 'list', `--project=${project}`, '--limit=20',
+    '--format=value(id,source.storageSource.bucket,source.storageSource.object,substitutions._SERVICE_NAME)']);
+  const builds = list.ok
+    ? list.stdout.split(/\r?\n/).map((l) => l.split('\t')).filter((c) => c[1] && c[2])
+    : [];
+  const pick = builds.find((c) => service && c[3] === service) || builds[0];
+  if (!pick) {
+    console.log(' ℹ️ 這個專案找不到 Cloud Build 上傳的原始碼（用 AI Studio 直接部署的網站通常沒有）。');
+    printAiStudioGuide();
+    return null;
+  }
+  const dest = newSourceDir(service || project);
+  const gsUri = `gs://${pick[1]}/${pick[2]}`;
+  console.log(`   找到建置 ${pick[0]} 的原始碼：${gsUri}`);
+  if (!runCmd('gcloud', ['storage', 'cp', gsUri, path.join(dest, 'source.tgz')]).ok
+    || !runCmd('tar', ['-xzf', 'source.tgz'], { cwd: dest }).ok) {
+    console.log('❌ 下載或解開雲端原始碼失敗。');
+    printAiStudioGuide();
+    return null;
+  }
+  return findProjectRoot(dest);
+}
+
+// [B] GitHub 網址 → git clone --depth 1
+async function fetchFromGithub(repoUrl) {
+  const url = repoUrl || (await ask(' 🔗 請貼上 GitHub 網址（例如 https://github.com/公司帳號/art-collector-web）：'));
+  if (!/^(https:\/\/|git@|file:\/\/)\S+$/.test(url)) {
+    console.log(`❌ 看不懂這個網址：「${url}」（要 https:// 或 git@ 開頭）`);
+    return null;
+  }
+  const name = url.replace(/\.git$/, '').split(/[/:]/).filter(Boolean).pop() || 'repo';
+  const dest = newSourceDir(name);
+  console.log(` ⬇️ 下載中：git clone --depth 1 ${url}`);
+  const r = runCmd('git', ['clone', '--depth', '1', url, dest]);
+  if (!r.ok) {
+    console.log(`❌ 下載失敗：${r.stderr.split(/\r?\n/).slice(-2).join(' ')}`);
+    console.log('   私人 repo 要先登入 GitHub（gh auth login），或改從 GitHub 網頁「Code → Download ZIP」下載後選 [C]。');
+    return null;
+  }
+  return findProjectRoot(dest);
+}
+
+// [C] 搜尋本機「下載」「桌面」：兩層內有 package.json 的資料夾＋最上層的 ZIP
+function searchLocalCandidates() {
+  const home = os.homedir();
+  const roots = process.env.LAZY_PACK_SEARCH_DIRS
+    ? process.env.LAZY_PACK_SEARCH_DIRS.split(path.delimiter).filter(Boolean)
+    : ['Downloads', 'Desktop', path.join('OneDrive', 'Desktop'), path.join('OneDrive', '桌面')].map((d) => path.join(home, d));
+  const found = [];
+  const walk = (dir, depth) => {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (e.name.startsWith('.') || IGNORE_DIRS.has(e.name)) continue;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (fs.existsSync(path.join(full, 'package.json'))) found.push({ kind: 'dir', path: full });
+        else if (depth < 2) walk(full, depth + 1);
+      } else if (depth === 1 && e.name.toLowerCase().endsWith('.zip')) {
+        found.push({ kind: 'zip', path: full });
+      }
+    }
+  };
+  for (const r of roots) if (fs.existsSync(r)) walk(r, 1);
+  const lazyPack = fs.realpathSync(REPO_ROOT);
+  return found
+    .filter((c) => !samePath(c.path, lazyPack))
+    .map((c) => ({ ...c, mtime: fs.statSync(c.path).mtimeMs }))
+    .sort((a, b) => b.mtime - a.mtime)
+    .slice(0, 15);
+}
+
+async function pickLocal() {
+  const cands = searchLocalCandidates();
+  if (cands.length === 0) {
+    console.log(' ℹ️ 「下載」「桌面」裡找不到有 package.json 的專案資料夾或 ZIP 檔。');
+    printAiStudioGuide();
+    return null;
+  }
+  console.log(' 📂 在本機找到這些可能是藏家推薦系統的原始碼（新的在前）：');
+  cands.forEach((c, i) => {
+    const d = new Date(c.mtime);
+    const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    console.log(`   [${i + 1}] ${c.kind === 'zip' ? '🗜️ ZIP ' : '📁 '}${c.path}（${day}）`);
+  });
+  const ans = await ask(' 👉 請輸入編號：');
+  const n = Number(ans);
+  if (!Number.isInteger(n) || n < 1 || n > cands.length) {
+    console.log(`❌ 沒有選到（輸入「${ans}」）。為了不掃錯專案，不自動挑；也可以直接用 --target "<資料夾>" 指定。`);
+    return null;
+  }
+  const c = cands[n - 1];
+  return c.kind === 'zip' ? extractZip(c.path) : c.path;
+}
+
+async function resolveTarget(cliArgs) {
+  const valueOf = (flag) => {
+    const i = cliArgs.indexOf(flag);
+    return i !== -1 && cliArgs[i + 1] && !cliArgs[i + 1].startsWith('--') ? cliArgs[i + 1] : null;
+  };
+  if (cliArgs.includes('--target')) {
+    const t = valueOf('--target');
+    if (!t) return { ok: false, msg: '--target 後面要接原始碼資料夾路徑。' };
+    return validateTarget(path.resolve(t));
+  }
+  if (isSelfTest) return validateTarget(SELF_TEST_TARGET);
+
+  const repoUrl = valueOf('--repo');
+  let source = valueOf('--source') || (repoUrl ? 'github' : null);
+  if (!source) {
+    console.log('\n------------------------------------------------------------------------------');
+    console.log(' 🧭 要掃描的藏家推薦系統原始碼在哪裡？（沒帶 --target，先找原始碼）');
+    console.log('   [A] 還在雲端（Google AI Studio／Cloud Run），電腦裡沒有 → 自動找雲端原始碼，找不到就教你下載');
+    console.log('   [B] 在 GitHub 上 → 貼網址，自動下載');
+    console.log('   [C] 已經下載到這台電腦（ZIP 或資料夾）→ 自動搜尋「下載」「桌面」（預設）');
+    const ans = (await ask(' 👉 請輸入 A / B / C（直接 Enter = C）：')).toUpperCase();
+    source = { A: 'cloud', B: 'github', C: 'local', '': 'local' }[ans];
+    if (!source) return { ok: false, msg: `看不懂「${ans}」，請輸入 A、B 或 C。` };
+  }
+  let dir = null;
+  if (source === 'cloud') dir = fetchFromCloud(parseEnvState(STATE_FILE));
+  else if (source === 'github') dir = await fetchFromGithub(repoUrl);
+  else if (source === 'local') dir = await pickLocal();
+  else return { ok: false, msg: `--source 只能是 cloud、github 或 local（收到「${source}」）。` };
+  if (!dir) return { ok: false, msg: '這次沒有拿到原始碼，細項 3-1 不執行。' };
+  return validateTarget(dir);
+}
+
+// -----------------------------------------------------------------------------
 // 主程式入口（一開始先說明互動方式與本階段工作項目）
 // -----------------------------------------------------------------------------
 const args = process.argv.slice(2);
@@ -444,8 +679,6 @@ const scanOnly = args.includes('--scan-only');
 const evalOnly = args.includes('--eval-only');
 const runScan = !evalOnly;
 const runAiEval = evalOnly || args.includes('--run-ai-eval') || isSelfTest;
-const targetIdx = args.indexOf('--target');
-const targetDir = targetIdx !== -1 && args[targetIdx + 1] ? path.resolve(args[targetIdx + 1]) : REPO_ROOT;
 
 const params = loadParams();
 console.log('==============================================================================');
@@ -458,6 +691,20 @@ console.log('   • 自動雙報告輸出：跑完自動產生「第三階段單
 console.log('------------------------------------------------------------------------------');
 console.log(` 📌 讀取參數檔 config/params.json：驗收題數=${params.eval_question_count} 題 | 預設測試預算=NT$${params.eval_max_budget_ntd.toLocaleString()} | EDM 日上限=${params.edm_daily_send_limit} 封`);
 console.log('==============================================================================');
+
+let targetDir = '';
+if (runScan) {
+  const t = await resolveTarget(args);
+  if (!t.ok) {
+    console.log(`\n❌ ${t.msg}`);
+    console.log(' 👉 可以這樣重跑：node lazy-pack/code-and-ai-audit.mjs --target "<藏家推薦系統原始碼資料夾>"');
+    console.log('    或只跑 20 題 AI 測試（不需原始碼）：node lazy-pack/code-and-ai-audit.mjs --eval-only');
+    process.exit(2);
+  }
+  targetDir = t.dir;
+  console.log(`\n 🎯 掃描目標：${targetDir}（${t.fileCount} 個程式碼檔）`);
+  if (t.warn) console.log(` ⚠️ ${t.warn}`);
+}
 
 const codeResult = runScan ? scanCodebase(targetDir) : { passed: true, fileCount: 0, skippedChecks: 0, findings: [] };
 const aiResult = runAiEval ? runAiEvaluation(params) : { passed: true, passedCount: 0, total: 0, passRate: 100 };
@@ -478,7 +725,7 @@ if (isSelfTest) {
   console.log('✅ [Self-Test 驗證通過] 負面測資（超預算、假畫作幻覺、EDM CC 名單外洩、個資套話）攔截邏輯運作正常！');
 }
 
-const { singleReportPath, fullReportPath } = writeReports(params, runScan, runAiEval, codeResult, aiResult);
+const { singleReportPath, fullReportPath } = writeReports(params, runScan, runAiEval, codeResult, aiResult, targetDir);
 
 console.log('\n==============================================================================');
 console.log(' 📄 報告已自動輸出（單次報告 ＋ 全部執行累計總報告）');
