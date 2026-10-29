@@ -997,7 +997,7 @@ if should_run_item 7; then
     SAVED_VERTEX_STATUS="已啟用 Vertex AI API（依實際呼叫字數計費，無底租）"
     add_stage_log "| 細項 2-4 | [選配] 啟用 Vertex AI API | ✅ 已啟用 |"
   elif [ "$VERTEX_ENABLED" = "no-role" ]; then
-    echo "⚠️ Vertex AI API 已啟用，但 Cloud Run 服務帳戶還沒有 roles/aiplatform.user，Cloud Run 還不能呼叫。"
+    echo "⚠️ Vertex AI API 已啟用，但 Cloud Run 服務帳戶沒有 Vertex AI 使用者／管理員角色，也沒有 Editor／Owner，Cloud Run 還不能呼叫。"
     grant_vertex_role="n"
     if [ "$MODE" = "interactive" ]; then
       read -r -p "👉 [可選細項] 要現在替服務帳戶 ${VERTEX_SA} 加上 roles/aiplatform.user 嗎？[y/N]: " grant_vertex_role
@@ -1018,6 +1018,7 @@ if should_run_item 7; then
   elif [ "$VERTEX_ENABLED" = "api-unknown" ]; then
     echo "⚠️ 查不到這個專案有沒有啟用 Vertex AI API（可能是你的帳號沒有權限或網路不通），這次不更動。"
     MANUAL_TODO_LIST+=("細項 2-4 [Vertex AI 狀態]：查不到 Vertex AI API 是否啟用，請於 https://console.cloud.google.com/apis/library/aiplatform.googleapis.com?project=${PROJECT_ID} 確認；需要時再重跑 --item 7。")
+    SAVED_VERTEX_STATUS="查不到 API 狀態（需手動確認）"
     add_stage_log "| 細項 2-4 | [選配] 啟用 Vertex AI API | ⚠️ 查不到 API 狀態，需手動確認 |"
   elif [ "$VERTEX_ENABLED" = "role-unknown" ]; then
     echo "⚠️ Vertex AI API 已啟用，但查不到 Cloud Run 服務帳戶的授權（可能是你的帳號沒有讀取 IAM 的權限），無法確認 Cloud Run 能不能呼叫。"

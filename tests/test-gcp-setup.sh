@@ -181,19 +181,21 @@ chkst t13c "SAVED_SECRET_COUNT=4"
 rm -f "$ST"
 FAKE_VERTEX_API=1 bash "$SH" --item 7 --project proj-a < /dev/null > "$S/out.txt" 2>&1; rc=$?
 rc_is t14a "$rc" 0
-chk t14a "服務帳戶還沒有 roles/aiplatform.user"
+chk t14a "服務帳戶沒有 Vertex AI 使用者／管理員角色"
 nochk t14a "專案已啟用 Vertex AI API"
 chkst t14a "授權未完成"
 # 14b. 有授權才判成已啟用
 rm -f "$ST"
 FAKE_VERTEX_API=1 FAKE_VERTEX_ROLE=1 bash "$SH" --item 7 --project proj-a < /dev/null > "$S/out.txt" 2>&1
 chk t14b "專案已啟用 Vertex AI API"
-nochk t14b "服務帳戶還沒有 roles/aiplatform.user"
+nochk t14b "服務帳戶沒有 Vertex AI 使用者／管理員角色"
 # 14c. Editor 涵蓋 Vertex 權限 → 算有授權
 rm -f "$ST"
 FAKE_VERTEX_API=1 FAKE_VERTEX_ROLE=roles/editor bash "$SH" --item 7 --project proj-a < /dev/null > "$S/out.txt" 2>&1
 chk t14c "專案已啟用 Vertex AI API"
-nochk t14c "服務帳戶還沒有 roles/aiplatform.user"
+nochk t14c "服務帳戶沒有 Vertex AI 使用者／管理員角色"
+chkst t14c "已啟用 Vertex AI API（依實際呼叫字數計費"
+nochkst t14c "授權未完成"
 # 14d. 缺角色時回答 y → 腳本補上授權（第一個 Enter 是 proj-a 有 2 個 Cloud Run 時的網站選擇）
 rm -f "$ST"
 export FAKE_GCLOUD_LOG="$S/log14d.txt"; : > "$FAKE_GCLOUD_LOG"
@@ -202,6 +204,7 @@ rc_is t14d "$rc" 0
 chk t14d "已替 Cloud Run 服務帳戶補上 Vertex AI 授權"
 grep -q "add-iam-policy-binding proj-a --member=serviceAccount:123456-compute@developer.gserviceaccount.com --role=roles/aiplatform.user" "$FAKE_GCLOUD_LOG" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14d] 沒有替預設服務帳戶加 roles/aiplatform.user"; }
 nochkst t14d "授權未完成"
+chkst t14d "已啟用 Vertex AI API（依實際呼叫字數計費"
 # 14e. 回答 y 但加角色失敗 → 不算完成
 rm -f "$ST"
 printf "\ny\n" | FAKE_VERTEX_API=1 FAKE_GCLOUD_FAIL=add-iam-policy-binding bash "$SH" --item 7 --project proj-a > "$S/out.txt" 2>&1
@@ -212,7 +215,7 @@ chkst t14e "授權未完成"
 rm -f "$ST"
 FAKE_VERTEX_API=1 FAKE_GCLOUD_FAIL=get-iam-policy bash "$SH" --item 7 --project proj-a < /dev/null > "$S/out.txt" 2>&1
 chk t14f "查不到 Cloud Run 服務帳戶的授權"
-nochk t14f "服務帳戶還沒有 roles/aiplatform.user"
+nochk t14f "服務帳戶沒有 Vertex AI 使用者／管理員角色"
 chkst t14f "授權未確認"
 # 14g. 列 API 失敗 → 不當成未啟用、不出啟用選單
 rm -f "$ST"
@@ -220,6 +223,7 @@ FAKE_GCLOUD_FAIL="config.name:aiplatform" bash "$SH" --item 7 --project proj-a <
 rc_is t14g "$rc" 0
 chk t14g "查不到這個專案有沒有啟用 Vertex AI API"
 nochk t14g "選配啟用 Google Cloud Vertex AI"
+chkst t14g "查不到 API 狀態"
 
 # 15. 方案 3B 的 PITR 依資料庫種類：PostgreSQL 開 point-in-time-recovery，MySQL 開 binlog
 rm -f "$ST"

@@ -77,5 +77,5 @@ art-collector-recommender/
 
 ## 改動後的驗證方式
 
-1. 修改 `lazy-pack/gcp-setup-and-check.sh` 後，用 Git Bash 的 `C:\Program Files\Git\bin\bash.exe -n lazy-pack/gcp-setup-and-check.sh` 驗證語法無誤，跑 `bash tests/test-gcp-setup.sh`（PATH 前面放假 gcloud，走真實分支、不連雲端；現在 105 項），並用 `--dry-run` 模式測試 `--stage 1`、`--stage 2`、`--stage cost` 與報告輸出。`--dry-run` 碰到 gcloud 的地方都換成寫死的假值，只驗得到選單與報告，不能取代前者。
+1. 修改 `lazy-pack/gcp-setup-and-check.sh` 後，用 Git Bash 的 `C:\Program Files\Git\bin\bash.exe -n lazy-pack/gcp-setup-and-check.sh` 驗證語法無誤，跑 `bash tests/test-gcp-setup.sh`（PATH 前面放假 gcloud，走真實分支、不連雲端；現在 109 項），並用 `--dry-run` 模式測試 `--stage 1`、`--stage 2`、`--stage cost` 與報告輸出。`--dry-run` 碰到 gcloud 的地方都換成寫死的假值，只驗得到選單與報告，不能取代前者。
 2. 修改 `lazy-pack/code-and-ai-audit.mjs` 或 `config/params.json` 後，執行 `node lazy-pack/code-and-ai-audit.mjs --self-test` 確認參數讀取、靜態掃描（掃 `tests/fixtures/fake-nextjs-app`）、模擬閱卷與報告輸出皆通過，再跑 `bash tests/test-code-audit.sh`（假 gcloud、本機假 git repo、假 ZIP 與假推薦 API 小伺服器，不連雲端；現在 194 項，約 2 分鐘（估））。手動跑 `--eval-only`、`--run-ai-eval` 前，先把 `reports/.lazy-pack-state.env` 備份並移開（裡面第一階段記下的真網址會被當成測試對象），或加 `--mock`；`tests/test-code-audit.sh` 自己會備份、移開，結束或被中斷時還原。

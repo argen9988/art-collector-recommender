@@ -24,6 +24,7 @@ M = {
  'M16': ('lazy-pack/gcp-setup-and-check.sh', 'VERTEX_ENABLED="role-unknown"', 'VERTEX_ENABLED="no-role"', 'gcp', 't14f'),
  'M17': ('lazy-pack/gcp-setup-and-check.sh', '--role="roles/aiplatform.user" >/dev/null; then\n      echo "✅ 已替', '--role="roles/aiplatform.user" >/dev/null || true; then\n      echo "✅ 已替', 'gcp', 't14e'),
  'M18': ('lazy-pack/gcp-setup-and-check.sh', 'VERTEX_ENABLED="api-unknown"', 'VERTEX_ENABLED="false"', 'gcp', 't14g'),
+ 'M20': ('lazy-pack/gcp-setup-and-check.sh', 'PITR_FLAG="--enable-point-in-time-recovery"', 'PITR_FLAG="--enable-bin-log"', 'gcp', 't15a'),
  'M19': ('lazy-pack/gcp-setup-and-check.sh', '[[ "$DB_VERSION" == MYSQL* ]] && PITR_FLAG="--enable-bin-log"', ':', 'gcp', 't15b'),
 }
 
