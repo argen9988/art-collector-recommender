@@ -12,7 +12,9 @@ case "$args" in
   "services list"*"aiplatform.googleapis.com"*) [ "${FAKE_VERTEX_API:-0}" = "1" ] && echo "aiplatform.googleapis.com" ;;
   "services list"*"cloudscheduler.googleapis.com"*) [ "${FAKE_SCHEDULER_API:-0}" = "1" ] && echo "cloudscheduler.googleapis.com" ;;
   "projects describe"*) echo "123456" ;;
-  "projects get-iam-policy"*) [ "${FAKE_VERTEX_ROLE:-0}" = "1" ] && echo "roles/aiplatform.user" ;;
+  # FAKE_VERTEX_ROLE：1＝回 roles/aiplatform.user，其他非 0 的值原樣當成服務帳戶的角色（例如 roles/editor）
+  "projects get-iam-policy"*)
+    case "${FAKE_VERTEX_ROLE:-0}" in 0) : ;; 1) echo "roles/aiplatform.user" ;; *) echo "$FAKE_VERTEX_ROLE" ;; esac ;;
   "services list"*"--project=proj-a"*) echo "run.googleapis.com" ;;
   "services list"*"--project=proj-c"*) echo "run.googleapis.com" ;;
   "run services list"*"--project=proj-a"*)
@@ -26,6 +28,7 @@ case "$args" in
   "sql instances describe"*"ipv4Enabled"*) echo "${FAKE_SQL_IPV4:-False}" ;;
   "sql instances describe"*"requireSsl"*) echo "True" ;;
   "sql instances describe"*"backupConfiguration"*) echo "True" ;;
+  "sql instances describe"*"databaseVersion"*) echo "${FAKE_SQL_VERSION:-POSTGRES_15}" ;;
   "sql instances describe"*"settings.tier"*) echo "${FAKE_SQL_TIER:-db-f1-micro}" ;;
   "sql instances describe"*"activationPolicy"*) echo "ALWAYS" ;;
   "sql instances describe"*"privateNetwork"*) echo "${FAKE_SQL_PRIVATE:-}" ;;

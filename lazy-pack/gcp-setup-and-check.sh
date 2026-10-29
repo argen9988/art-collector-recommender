@@ -920,9 +920,15 @@ if should_run_item 5 || should_run_item 6; then
             ;;
           4)
             echo "🔧 正在將 ${SQL_INSTANCE} 設定為 db-f1-micro + 50GB SSD + 30 天備份與 PITR..."
+            # PITR 的開法依資料庫種類不同：MySQL 開二進位記錄（binlog），PostgreSQL／SQL Server 開 point-in-time-recovery
+            PITR_FLAG="--enable-point-in-time-recovery"
+            if [ "$MODE" != "dry-run" ]; then
+              DB_VERSION="$(gcloud sql instances describe "$SQL_INSTANCE" --project="$PROJECT_ID" --format="value(databaseVersion)" 2>/dev/null || true)"
+              [[ "$DB_VERSION" == MYSQL* ]] && PITR_FLAG="--enable-bin-log"
+            fi
             apply_db_plan "4" "方案 3B：db-f1-micro (24h) + 50GB SSD + 30天 PITR 備份" 500 580 \
               "已選方案 3B：db-f1-micro + 50GB + 30天PITR (約 NT\$500～580/月)" \
-              --tier=db-f1-micro --storage-size=50GB --retained-backups-count=30 --enable-point-in-time-recovery
+              --tier=db-f1-micro --storage-size=50GB --retained-backups-count=30 "$PITR_FLAG"
             ;;
           5)
             echo "🔧 正在將 ${SQL_INSTANCE} 調整為 db-g1-small (24h 全天候運行)..."
@@ -964,13 +970,22 @@ if should_run_item 7; then
   if [ "$MODE" = "dry-run" ]; then
     VERTEX_ENABLED="false"
   else
-    if gcloud services list --enabled --project="$PROJECT_ID" --filter="config.name:aiplatform.googleapis.com" --format="value(config.name)" 2>/dev/null | grep -q "aiplatform.googleapis.com"; then
+    # 列 API 失敗（沒權限、網路斷）時標「api-unknown」，不當成未啟用、不出啟用選單
+    if ! VERTEX_API_LIST="$(gcloud services list --enabled --project="$PROJECT_ID" --filter="config.name:aiplatform.googleapis.com" --format="value(config.name)" 2>/dev/null)"; then
+      VERTEX_ENABLED="api-unknown"
+    elif printf '%s\n' "$VERTEX_API_LIST" | grep -q "aiplatform.googleapis.com"; then
       VERTEX_ENABLED="true"
+      # Cloud Run 預設用 Compute Engine 預設服務帳戶；Vertex 使用者／管理員角色，或涵蓋它們的 Editor／Owner 都算有授權
+      # （沒有組織的專案，這個帳戶通常自動有 Editor）。查不到（沒權限讀 IAM）時另外標「未確認」，不當成沒授權。
       PROJECT_NUM="$(gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)" 2>/dev/null || true)"
-      if [ -n "$PROJECT_NUM" ] && ! gcloud projects get-iam-policy "$PROJECT_ID" \
+      VERTEX_SA=""
+      [ -n "$PROJECT_NUM" ] && VERTEX_SA="${PROJECT_NUM}-compute@developer.gserviceaccount.com"
+      if [ -z "$VERTEX_SA" ] || ! VERTEX_SA_ROLES="$(gcloud projects get-iam-policy "$PROJECT_ID" \
         --flatten="bindings[].members" \
-        --filter="bindings.role:roles/aiplatform.user AND bindings.members:serviceAccount:${PROJECT_NUM}-compute@developer.gserviceaccount.com" \
-        --format="value(bindings.role)" 2>/dev/null | grep -q "roles/aiplatform.user"; then
+        --filter="bindings.members:serviceAccount:${VERTEX_SA}" \
+        --format="value(bindings.role)" 2>/dev/null)"; then
+        VERTEX_ENABLED="role-unknown"
+      elif ! printf '%s\n' "$VERTEX_SA_ROLES" | grep -qE '^roles/(aiplatform\.user|aiplatform\.admin|editor|owner)$'; then
         VERTEX_ENABLED="no-role"
       fi
     fi
@@ -983,9 +998,32 @@ if should_run_item 7; then
     add_stage_log "| 細項 2-4 | [選配] 啟用 Vertex AI API | ✅ 已啟用 |"
   elif [ "$VERTEX_ENABLED" = "no-role" ]; then
     echo "⚠️ Vertex AI API 已啟用，但 Cloud Run 服務帳戶還沒有 roles/aiplatform.user，Cloud Run 還不能呼叫。"
-    MANUAL_TODO_LIST+=("細項 2-4 [Vertex AI 授權]：API 已啟用但服務帳戶缺 Vertex AI 使用者角色，請於 https://console.cloud.google.com/iam-admin/iam?project=${PROJECT_ID} 補上，或重跑 --item 7 選 [2]。")
-    SAVED_VERTEX_STATUS="已啟用 Vertex AI API（授權未完成，依實際呼叫字數計費，無底租）"
-    add_stage_log "| 細項 2-4 | [選配] 啟用 Vertex AI API | ⚠️ API 已啟用，授權未完成，需手動處理 |"
+    grant_vertex_role="n"
+    if [ "$MODE" = "interactive" ]; then
+      read -r -p "👉 [可選細項] 要現在替服務帳戶 ${VERTEX_SA} 加上 roles/aiplatform.user 嗎？[y/N]: " grant_vertex_role
+    fi
+    if [[ "$grant_vertex_role" =~ ^[Yy]$ ]] && gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+      --member="serviceAccount:${VERTEX_SA}" \
+      --role="roles/aiplatform.user" >/dev/null; then
+      echo "✅ 已替 Cloud Run 服務帳戶補上 Vertex AI 授權（roles/aiplatform.user）！"
+      FIXED_COUNT=$((FIXED_COUNT + 1))
+      SAVED_VERTEX_STATUS="已啟用 Vertex AI API（依實際呼叫字數計費，無底租）"
+      add_stage_log "| 細項 2-4 | [選配] 啟用 Vertex AI API | 🔧 本次補上服務帳戶授權 |"
+    else
+      [[ "$grant_vertex_role" =~ ^[Yy]$ ]] && echo "❌ 補上授權失敗，沒有變更。"
+      MANUAL_TODO_LIST+=("細項 2-4 [Vertex AI 授權]：API 已啟用但服務帳戶 ${VERTEX_SA} 缺 Vertex AI 使用者角色，請於 https://console.cloud.google.com/iam-admin/iam?project=${PROJECT_ID} 補上，或重跑 --item 7 時回答 y 讓腳本補上。")
+      SAVED_VERTEX_STATUS="已啟用 Vertex AI API（授權未完成，依實際呼叫字數計費，無底租）"
+      add_stage_log "| 細項 2-4 | [選配] 啟用 Vertex AI API | ⚠️ API 已啟用，授權未完成，需手動處理 |"
+    fi
+  elif [ "$VERTEX_ENABLED" = "api-unknown" ]; then
+    echo "⚠️ 查不到這個專案有沒有啟用 Vertex AI API（可能是你的帳號沒有權限或網路不通），這次不更動。"
+    MANUAL_TODO_LIST+=("細項 2-4 [Vertex AI 狀態]：查不到 Vertex AI API 是否啟用，請於 https://console.cloud.google.com/apis/library/aiplatform.googleapis.com?project=${PROJECT_ID} 確認；需要時再重跑 --item 7。")
+    add_stage_log "| 細項 2-4 | [選配] 啟用 Vertex AI API | ⚠️ 查不到 API 狀態，需手動確認 |"
+  elif [ "$VERTEX_ENABLED" = "role-unknown" ]; then
+    echo "⚠️ Vertex AI API 已啟用，但查不到 Cloud Run 服務帳戶的授權（可能是你的帳號沒有讀取 IAM 的權限），無法確認 Cloud Run 能不能呼叫。"
+    MANUAL_TODO_LIST+=("細項 2-4 [Vertex AI 授權]：API 已啟用但查不到服務帳戶的授權，請專案 Owner 到 https://console.cloud.google.com/iam-admin/iam?project=${PROJECT_ID} 確認 Compute Engine 預設服務帳戶有 Vertex AI 使用者角色。")
+    SAVED_VERTEX_STATUS="已啟用 Vertex AI API（授權未確認，依實際呼叫字數計費，無底租）"
+    add_stage_log "| 細項 2-4 | [選配] 啟用 Vertex AI API | ⚠️ API 已啟用，授權未確認，需手動確認 |"
   else
     if [ "$MODE" = "interactive" ] || [ "$MODE" = "dry-run" ]; then
       echo "   [1] 維持 Google AI Studio（Paid Tier 付費層）＋ Secret Manager 金鑰隔離（預設推薦，直接跳過）"

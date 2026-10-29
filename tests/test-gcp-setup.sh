@@ -189,6 +189,50 @@ rm -f "$ST"
 FAKE_VERTEX_API=1 FAKE_VERTEX_ROLE=1 bash "$SH" --item 7 --project proj-a < /dev/null > "$S/out.txt" 2>&1
 chk t14b "專案已啟用 Vertex AI API"
 nochk t14b "服務帳戶還沒有 roles/aiplatform.user"
+# 14c. Editor 涵蓋 Vertex 權限 → 算有授權
+rm -f "$ST"
+FAKE_VERTEX_API=1 FAKE_VERTEX_ROLE=roles/editor bash "$SH" --item 7 --project proj-a < /dev/null > "$S/out.txt" 2>&1
+chk t14c "專案已啟用 Vertex AI API"
+nochk t14c "服務帳戶還沒有 roles/aiplatform.user"
+# 14d. 缺角色時回答 y → 腳本補上授權（第一個 Enter 是 proj-a 有 2 個 Cloud Run 時的網站選擇）
+rm -f "$ST"
+export FAKE_GCLOUD_LOG="$S/log14d.txt"; : > "$FAKE_GCLOUD_LOG"
+printf "\ny\n" | FAKE_VERTEX_API=1 bash "$SH" --item 7 --project proj-a > "$S/out.txt" 2>&1; rc=$?
+rc_is t14d "$rc" 0
+chk t14d "已替 Cloud Run 服務帳戶補上 Vertex AI 授權"
+grep -q "add-iam-policy-binding proj-a --member=serviceAccount:123456-compute@developer.gserviceaccount.com --role=roles/aiplatform.user" "$FAKE_GCLOUD_LOG" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14d] 沒有替預設服務帳戶加 roles/aiplatform.user"; }
+nochkst t14d "授權未完成"
+# 14e. 回答 y 但加角色失敗 → 不算完成
+rm -f "$ST"
+printf "\ny\n" | FAKE_VERTEX_API=1 FAKE_GCLOUD_FAIL=add-iam-policy-binding bash "$SH" --item 7 --project proj-a > "$S/out.txt" 2>&1
+chk t14e "補上授權失敗"
+nochk t14e "已替 Cloud Run 服務帳戶補上"
+chkst t14e "授權未完成"
+# 14f. 讀不到 IAM（沒權限）→ 標「未確認」，不說缺角色
+rm -f "$ST"
+FAKE_VERTEX_API=1 FAKE_GCLOUD_FAIL=get-iam-policy bash "$SH" --item 7 --project proj-a < /dev/null > "$S/out.txt" 2>&1
+chk t14f "查不到 Cloud Run 服務帳戶的授權"
+nochk t14f "服務帳戶還沒有 roles/aiplatform.user"
+chkst t14f "授權未確認"
+# 14g. 列 API 失敗 → 不當成未啟用、不出啟用選單
+rm -f "$ST"
+FAKE_GCLOUD_FAIL="config.name:aiplatform" bash "$SH" --item 7 --project proj-a < /dev/null > "$S/out.txt" 2>&1; rc=$?
+rc_is t14g "$rc" 0
+chk t14g "查不到這個專案有沒有啟用 Vertex AI API"
+nochk t14g "選配啟用 Google Cloud Vertex AI"
+
+# 15. 方案 3B 的 PITR 依資料庫種類：PostgreSQL 開 point-in-time-recovery，MySQL 開 binlog
+rm -f "$ST"
+export FAKE_GCLOUD_LOG="$S/log15a.txt"; : > "$FAKE_GCLOUD_LOG"
+printf "\n4\ny\n" | bash "$SH" --item 6 --project proj-a > "$S/out.txt" 2>&1; rc=$?
+rc_is t15a "$rc" 0
+grep -q "sql instances patch db-1 .*--enable-point-in-time-recovery" "$FAKE_GCLOUD_LOG" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t15a] PostgreSQL 沒開 --enable-point-in-time-recovery"; }
+grep -q "enable-bin-log" "$FAKE_GCLOUD_LOG" && { fail=$((fail+1)); echo "FAIL [t15a] PostgreSQL 不該開 --enable-bin-log"; } || pass=$((pass+1))
+rm -f "$ST"
+export FAKE_GCLOUD_LOG="$S/log15b.txt"; : > "$FAKE_GCLOUD_LOG"
+printf "\n4\ny\n" | FAKE_SQL_VERSION=MYSQL_8_0 bash "$SH" --item 6 --project proj-a > "$S/out.txt" 2>&1
+grep -q "sql instances patch db-1 .*--enable-bin-log" "$FAKE_GCLOUD_LOG" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t15b] MySQL 沒開 --enable-bin-log"; }
+grep -q "enable-point-in-time-recovery" "$FAKE_GCLOUD_LOG" && { fail=$((fail+1)); echo "FAIL [t15b] MySQL 不該開 --enable-point-in-time-recovery"; } || pass=$((pass+1))
 
 echo "PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]

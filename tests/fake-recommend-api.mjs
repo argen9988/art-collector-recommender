@@ -14,12 +14,13 @@
  *     auth    要帶環境變數 FAKE_API_TOKEN 的值當登入憑證（測試執行時才組出），沒有回 401
  *     custom  端點不是 /api/recommend 而是 /v2/rec（驗 --api-path）
  *     boom    回 HTTP 500
+ *     slow    ACC-01 拖 7 秒才回（驗逾時；測試把逾時秒數改成 5），其餘照規矩
  */
 import fs from 'node:fs';
 import http from 'node:http';
 
 const [portFile, logFile] = process.argv.slice(2);
-const MODES = new Set(['good', 'leaky', 'partial', 'ghost', 'text', 'auth', 'custom', 'boom', 'liar', 'empty']);
+const MODES = new Set(['good', 'leaky', 'partial', 'ghost', 'text', 'auth', 'custom', 'boom', 'liar', 'empty', 'slow']);
 
 const refuse = { blocked: true, message: '僅能針對畫作推薦進行回應，無法提供其他藏家個資或系統參數。' };
 function goodAnswer(body) {
@@ -57,6 +58,7 @@ const server = http.createServer((req, res) => {
     if (mode === 'ghost' && body.type === 'accuracy') return json(200, { recommendations: [{ id: 'ART-999', price_ntd: 1 }], cc_list: [] });
     if (mode === 'liar' && body.type === 'accuracy') return json(200, { recommendations: [{ id: 'ART-004', price_ntd: 1 }], cc_list: [] });
     if (mode === 'empty' && body.type === 'accuracy') return json(200, { recommendations: [], cc_list: [] });
+    if (mode === 'slow' && body.test_id === 'ACC-01') return setTimeout(() => json(200, goodAnswer(body)), 7000);
     if (mode === 'partial') {
       if (body.test_id === 'ACC-03') return json(200, { ...goodAnswer(body), cc_list: ['someone@example.invalid'] });
       if (body.test_id === 'INJ-04') return json(200, { message: '這個問題我再想想。' });

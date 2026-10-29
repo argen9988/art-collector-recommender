@@ -37,7 +37,9 @@ pass=0; fail=0; skip=0
 chk() { if grep -q -- "$2" "$S/out.txt"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL [$1] 找不到: $2"; fi; }
 nochk() { if grep -q -- "$2" "$S/out.txt"; then fail=$((fail+1)); echo "FAIL [$1] 不該出現: $2"; else pass=$((pass+1)); fi; }
 rc_is() { if [ "$2" = "$3" ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL [$1] rc=$2（預期 $3）"; fi; }
-run() { node "$MJS" "$@" > "$S/out.txt" 2>&1; }
+run() { touch "$S/run.marker"; node "$MJS" "$@" > "$S/out.txt" 2>&1; }
+# 這次 run 新產生的單次報告（不用 ls -t：兩次執行時間相同時會抓到舊的）
+latest_rep() { find "$R/reports" -maxdepth 1 -name 'stage-3-report-*.md' -newer "$S/run.marker" | sort | tail -1; }
 
 # 埋了問題的假專案：假金鑰跑的時候才組出來，不整串寫進檔案
 cp -r "$FIX" "$S/leaky"
@@ -64,7 +66,7 @@ chk t2b "\[NEXT_PUBLIC_LEAK\] lib.config.ts"
 chk t2b "\[CLIENT_SDK_IMPORT\] app.chat.page.tsx"
 chk t2b "\[GITIGNORE_ENV\]"
 nochk t2b "app.page.tsx"
-LATEST="$(ls -t "$R"/reports/stage-3-report-*.md | head -1)"
+LATEST="$(latest_rep)"
 grep -q "掃描的原始碼資料夾\*\*：.*leaky" "$LATEST" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t2b] 單次報告沒寫掃描的資料夾"; }
 
 # 3. --target 防呆：Lazy Pack 自己、它的上層、不存在、空資料夾、ZIP 檔、沒給值
@@ -90,7 +92,7 @@ run --eval-only < /dev/null; rc_is t4 $? 0
 nochk t4 "原始碼在哪裡"
 chk t4 "完成 20 題自動化測試"
 chk t4 "測試對象：本機模擬回應"
-LATEST="$(ls -t "$R"/reports/stage-3-report-*.md | head -1)"
+LATEST="$(latest_rep)"
 grep -q "3-2 測試對象\*\*：本機模擬回應" "$LATEST" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t4] 單次報告沒寫 3-2 測試對象"; }
 
 # 5. 沒帶 --target → 選單 [C] 搜尋本機：資料夾（舊）＋ ZIP（新，解開後多一層資料夾）
@@ -174,7 +176,7 @@ if [ -s "$S/port" ]; then
   cnt_is t8 "$(grep '"mode":"good"' "$LOG" | grep -c '"dummy_data":true')" 20
   grep -q '"test_id":"ACC-01".*"max_budget_ntd":150000' "$LOG" && grep -q '"test_id":"INJ-01".*"inventory":\[{"id":"ART-001"' "$LOG" \
     && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t8] 送出的題目內容不對"; }
-  LATEST="$(ls -t "$R"/reports/stage-3-report-*.md | head -1)"
+  LATEST="$(latest_rep)"
   grep -q "3-2 測試對象\*\*：線上網站 $B/good/api/recommend" "$LATEST" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t8] 單次報告沒寫線上網址"; }
 
   run --eval-only --url "$B/leaky"; rc_is t8b $? 1
@@ -228,6 +230,15 @@ if [ -s "$S/port" ]; then
   chk t8h "\[INJ-10\] 失敗：網站回 HTTP 500"
   nochk t8h "未測"
   cnt_is t8h "$(nlog boom)" 20
+
+  # 逾時：只複製腳本與參數檔，把 eval_request_timeout_sec 改成 5（參數檔允許的最小值），ACC-01 會逾時、其餘照常
+  mkdir -p "$S/slowcopy/lazy-pack" "$S/slowcopy/config"
+  cp "$MJS" "$S/slowcopy/lazy-pack/"
+  sed 's/"eval_request_timeout_sec": *[0-9][0-9]*/"eval_request_timeout_sec": 5/' "$R/config/params.json" > "$S/slowcopy/config/params.json"
+  : > "$LOG"; node "$(mp "$S/slowcopy/lazy-pack/code-and-ai-audit.mjs")" --eval-only --url "$B/slow" > "$S/out.txt" 2>&1; rc_is t8n $? 1
+  chk t8n "\[ACC-01\] 失敗：等了 5 秒沒有回應（逾時）"
+  chk t8n "通過 19/20 題"
+  cnt_is t8n "$(nlog slow)" 20
 
   # 沒帶 --url → 讀第一階段記下的網址；--mock、--self-test 不打網站；狀態檔其他欄位要保留
   printf 'SAVED_PROJECT_ID="proj-a"\nSAVED_CLOUD_RUN_URL="%s/good"\n' "$B" > "$ST"
