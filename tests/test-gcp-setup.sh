@@ -152,5 +152,19 @@ printf "\ny\nn\nn\n" | FAKE_GCLOUD_LOG="$S/log11c.txt" FAKE_SQL_IPV4=True FAKE_S
 grep -q "no-assign-ip" "$S/log11c.txt" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t11c] 有私有連線且回答 y 應該關公網 IP"; }
 chk t11c "已關閉"
 
+# 11d. 讀不到私有網路設定（describe 失敗）→ 不當成「沒有私有連線」，也不關公網 IP
+: > "$S/log11d.txt"
+printf "\ny\ny\ny\n" | FAKE_GCLOUD_LOG="$S/log11d.txt" FAKE_GCLOUD_FAIL="privateNetwork" FAKE_SQL_IPV4=True bash "$SH" --item 5 --project proj-a > "$S/out.txt" 2>&1
+chk t11d "讀不到 .* 的私有網路連線設定"
+grep -q "no-assign-ip" "$S/log11d.txt" && { fail=$((fail+1)); echo "FAIL [t11d] 讀不到私有連線設定卻關了公網 IP"; } || pass=$((pass+1))
+
+# 12. 方案 3 遇到實例已經是 db-g1-small → 說已符合、不呼叫 patch
+: > "$S/log12.txt"
+printf "\n3\ny\n" | FAKE_GCLOUD_LOG="$S/log12.txt" FAKE_SQL_TIER=db-g1-small bash "$SH" --item 6 --project proj-a > "$S/out.txt" 2>&1; rc=$?
+rc_is t12 "$rc" 0
+chk t12 "已經是 db-g1-small，沒有變更"
+nochk t12 "已選方案 3A"
+grep -q "sql instances patch" "$S/log12.txt" && { fail=$((fail+1)); echo "FAIL [t12] 已是 db-g1-small 卻呼叫了 patch"; } || pass=$((pass+1))
+
 echo "PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]

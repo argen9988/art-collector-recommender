@@ -2,7 +2,7 @@
 
 > 遵循全域規則：待辦文件只留還沒做完的項目；做完的項目已移入 [`docs/worklog/2026-10.md`](./worklog/2026-10.md)。
 
-- [ ] **【審閱後續】段 C 第 2 件修改已全部完成（`1c09ec4`），剩下**：(1) 改壞驗證剩 10 項沒跑：`python tests/mutate.py M1 M2 M3 M4 M5 M6 M9 M10 M11 M12`（每項約 1～3 分鐘；預測 M1／M2／M3／M5／M11／M12 沒有測試抓得到，抓不到的補測資：密碼含 `@` 的 `--repo`、含 `%` 的 runCmd 參數、`git clone` 參數順序、`--self-test` 後狀態檔不存在、`CURRENT_TIER=db-g1-small` 選 3A、describe 失敗的私有網路）；(2) Opus 抽查新發現兩點：`--item 8` 單獨重跑時 `SAVED_SECRET_COUNT` 越加越大（`lazy-pack/gcp-setup-and-check.sh` 第 1106、1122 行附近，細項 4 沒跑時以狀態檔舊值為起點）；Vertex 授權失敗後重跑被判成「已啟用」並蓋掉（第 964～973 行，API 已啟用時應再查 `roles/aiplatform.user`）；(3) 之後再審一輪只看這兩點的修改。
+- [ ] **【審閱後續】段 C 第 2 件修改已全部完成（`1c09ec4`），剩下**：(1) 改壞驗證已全部跑完，補了 4 項測資（見 worklog 2026-10-29；M2、M3 為等價改壞不補）；(2) Opus 抽查新發現兩點：`--item 8` 單獨重跑時 `SAVED_SECRET_COUNT` 越加越大（`lazy-pack/gcp-setup-and-check.sh` 第 1106、1122 行附近，細項 4 沒跑時以狀態檔舊值為起點）；Vertex 授權失敗後重跑被判成「已啟用」並蓋掉（第 964～973 行，API 已啟用時應再查 `roles/aiplatform.user`）；(3) 之後再審一輪只看這兩點的修改。
 ---
 
 ## 零、 Lazy Pack 工具包補強與審閱待辦（下次開工優先執行）

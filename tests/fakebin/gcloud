@@ -22,7 +22,7 @@ case "$args" in
   "sql instances describe"*"ipv4Enabled"*) echo "${FAKE_SQL_IPV4:-False}" ;;
   "sql instances describe"*"requireSsl"*) echo "True" ;;
   "sql instances describe"*"backupConfiguration"*) echo "True" ;;
-  "sql instances describe"*"settings.tier"*) echo "db-f1-micro" ;;
+  "sql instances describe"*"settings.tier"*) echo "${FAKE_SQL_TIER:-db-f1-micro}" ;;
   "sql instances describe"*"activationPolicy"*) echo "ALWAYS" ;;
   "sql instances describe"*"privateNetwork"*) echo "${FAKE_SQL_PRIVATE:-}" ;;
   "secrets describe"*) [ "${FAKE_SECRETS_MISSING:-0}" = "1" ] && exit 1 ;;

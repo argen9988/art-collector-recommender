@@ -53,6 +53,7 @@ run --self-test; rc_is t1 $? 0
 chk t1 "掃描目標：.*fake-nextjs-app"
 chk t1 "未發現任何硬編碼 API Key"
 chk t1 "Self-Test 驗證通過"
+[ ! -f "$ST" ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t1] --self-test 不該寫狀態檔"; }
 
 # 2. 乾淨假專案 → 通過；埋了問題的複本 → 四種問題都抓到
 run --target "$(mp "$FIX")" --scan-only; rc_is t2 $? 0
@@ -292,6 +293,12 @@ chk t8l "不要放帳號密碼"
 nochk t8l "user:pw"
 run --repo "https://github.com/x/y&calc" < /dev/null; rc_is t8l2 $? 2
 chk t8l2 "網址含特殊字元"
+# 8m. 密碼本身含 @ 的網址（格式不合、走「看不懂」那條）：畫面只能留 ***@，密碼的任何一段都不能漏
+run --repo "ftp://user:pwleak@zzleak@host.example/x" < /dev/null; rc_is t8m $? 2
+chk t8m "看不懂這個網址"
+chk t8m "//\*\*\*@host.example/x"
+nochk t8m "pwleak"
+nochk t8m "zzleak"
 
 # 9. --url 防呆：沒給值、不是網址、ftp、連不上（不重試每一題）、非 https 的外部網址要警告
 run --eval-only --url; rc_is t9 $? 2
