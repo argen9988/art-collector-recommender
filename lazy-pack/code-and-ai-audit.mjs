@@ -108,9 +108,9 @@ function loadParams() {
 const samePath = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
 
 // 印出網址前：遮掉 //帳號:密碼@，並去掉 ? 與 # 之後的內容（可能夾金鑰）
-const redactUrl = (u) => String(u).replace(/\/\/[^/@\s]*@/g, '//***@').replace(/[?#].*$/s, '');
+const redactUrl = (u) => String(u).replace(/\/\/[^/\s]*@/g, '//***@').replace(/[?#].*$/s, '');
 // 印 git 的錯誤訊息前：遮掉 //…@
-const redactText = (t) => String(t).replace(/\/\/[^/@\s]*@/g, '//***@');
+const redactText = (t) => String(t).replace(/\/\/[^/\s]*@/g, '//***@');
 
 const IGNORE_DIRS = new Set(['node_modules', '.git', '.next', 'dist', 'build', '.venv', '__pycache__']); // reports 只忽略專案自己的 REPORTS_DIR（見 collectFiles）
 const CODE_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.env', '.json', '.md']);
@@ -607,6 +607,10 @@ async function ask(question) {
 
 // Windows 的 gcloud、git 是 .cmd，要經 cmd.exe 才找得到；參數一律加雙引號
 function runCmd(cmd, cmdArgs, opts = {}) {
+  // Windows 經 cmd.exe：任何參數含這些字元（雙引號內 %VAR% 也會展開）就不執行
+  if (process.platform === 'win32' && cmdArgs.some((a) => /["&|<>^%]/.test(String(a)))) {
+    return { ok: false, stdout: '', stderr: '參數含特殊字元（" & | < > ^ %），為安全起見不執行' };
+  }
   const r = process.platform === 'win32'
     ? spawnSync([cmd, ...cmdArgs.map((a) => `"${a}"`)].join(' '), { shell: true, encoding: 'utf-8', ...opts })
     : spawnSync(cmd, cmdArgs, { encoding: 'utf-8', ...opts });
@@ -652,7 +656,7 @@ function newSourceDir(name) {
 
 function extractZip(zipPath) {
   // Windows 的命令列會經 cmd.exe：路徑含這些字元就拒絕，避免被當成指令
-  if (/["&|<>^%]/.test(zipPath)) {
+  if (process.platform === 'win32' && /["&|<>^%]/.test(zipPath)) {
     console.log(`❌ ZIP 路徑含特殊字元（" & | < > ^ %），為安全起見不解壓縮：${zipPath}（請改名或手動解壓縮後用 --target 指定資料夾）`);
     return null;
   }
@@ -716,12 +720,12 @@ function fetchFromCloud(state) {
 // [B] GitHub 網址 → git clone --depth 1
 async function fetchFromGithub(repoUrl) {
   const url = repoUrl || (await ask(' 🔗 請貼上 GitHub 網址（例如 https://github.com/公司帳號/art-collector-web）：'));
-  if (!/^(https:\/\/|git@|file:\/\/)\S+$/.test(url)) {
+  if (!/^(https:\/\/|git@[A-Za-z0-9]|file:\/\/)\S+$/.test(url)) {
     console.log(`❌ 看不懂這個網址：「${redactUrl(url)}」（要 https:// 或 git@ 開頭）`);
     return null;
   }
   // 命令會經 cmd.exe（Windows）：含這些字元就拒絕
-  if (/["&|<>^%]/.test(url)) {
+  if (process.platform === 'win32' && /["&|<>^%]/.test(url)) {
     console.log('❌ 網址含特殊字元（" & | < > ^ %），不下載。');
     return null;
   }
@@ -732,7 +736,7 @@ async function fetchFromGithub(repoUrl) {
   const name = url.replace(/\.git$/, '').split(/[/:]/).filter(Boolean).pop() || 'repo';
   const dest = newSourceDir(name);
   console.log(` ⬇️ 下載中：git clone --depth 1 ${redactUrl(url)}`);
-  const r = runCmd('git', ['clone', '--depth', '1', url, dest]);
+  const r = runCmd('git', ['clone', '--depth', '1', '--', url, dest]);
   if (!r.ok) {
     console.log(`❌ 下載失敗：${redactText(r.stderr).split(/\r?\n/).slice(-2).join(' ')}`);
     console.log('   私人 repo 要先登入 GitHub（gh auth login），或改從 GitHub 網頁「Code → Download ZIP」下載後選 [C]。');

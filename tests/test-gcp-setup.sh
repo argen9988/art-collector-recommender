@@ -8,7 +8,7 @@ R="${R_UNDER_TEST:-$(cd -P "$T/.." && pwd -P)}"
 SH="$R/lazy-pack/gcp-setup-and-check.sh"
 ST="$R/reports/.lazy-pack-state.env"
 mkdir -p "$R/reports"
-[ -f "$ST" ] && cp "$ST" "$S/state.bak"
+[ -f "$ST" ] && { cp "$ST" "$S/state.bak" || exit 2; }
 touch "$S/start.marker"
 # 中途被中斷（Ctrl-C）也要還原使用者的狀態檔、刪掉本次產生的報告、清暫存
 cleanup() {
@@ -116,6 +116,7 @@ rm -f "$ST"
 printf "\n5\ny\n" | FAKE_GCLOUD_FAIL="sql instances patch" bash "$SH" --item 6 --project proj-a > "$S/out.txt" 2>&1; rc=$?
 rc_is t9a "$rc" 0
 chk t9a "方案 5 套用失敗"
+chkst t9a "SAVED_PROJECT_ID="
 nochkst t9a "SAVED_DB_MIN_NTD=780"
 printf "\n5\ny\n" | bash "$SH" --item 6 --project proj-a > "$S/out.txt" 2>&1; rc=$?
 rc_is t9b "$rc" 0
@@ -125,7 +126,8 @@ printf "\n2\nn\n" | bash "$SH" --item 6 --project proj-a > "$S/out.txt" 2>&1
 chk t9c "已取消方案 2"
 chkst t9c "SAVED_DB_MIN_NTD=780"
 # 方案 1 依現有規格（假 gcloud 回 db-f1-micro）對應月租
-printf "\n1\n" | bash "$SH" --item 6 --project proj-a > "$S/out.txt" 2>&1
+printf "\n1\n" | bash "$SH" --item 6 --project proj-a > "$S/out.txt" 2>&1; rc=$?
+rc_is t9d "$rc" 0
 chkst t9d "SAVED_DB_MIN_NTD=280"
 
 # 10. Secret 建立失敗不計數
@@ -143,6 +145,7 @@ grep -q "no-assign-ip" "$S/log11.txt" && { fail=$((fail+1)); echo "FAIL [t11] �
 # 有私有連線時回答 y 才會真的關；回答 n 不呼叫 patch
 : > "$S/log11b.txt"
 printf "\nn\nn\nn\n" | FAKE_GCLOUD_LOG="$S/log11b.txt" FAKE_SQL_IPV4=True FAKE_SQL_PRIVATE=projects/p/global/networks/n bash "$SH" --item 5 --project proj-a > "$S/out.txt" 2>&1
+chk t11b "目前開啟了公網 IP"
 grep -q "no-assign-ip" "$S/log11b.txt" && { fail=$((fail+1)); echo "FAIL [t11b] 回答 n 卻關了公網 IP"; } || pass=$((pass+1))
 : > "$S/log11c.txt"
 printf "\ny\nn\nn\n" | FAKE_GCLOUD_LOG="$S/log11c.txt" FAKE_SQL_IPV4=True FAKE_SQL_PRIVATE=projects/p/global/networks/n bash "$SH" --item 5 --project proj-a > "$S/out.txt" 2>&1

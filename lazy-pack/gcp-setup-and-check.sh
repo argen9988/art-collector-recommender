@@ -335,7 +335,8 @@ if [ -z "$PROJECT_ID" ]; then
   PROJECT_AUTO_PICK="false"
   if [ "$idx" -gt 1 ]; then
     project_choice=""
-    read -r -p "👉 請輸入要檢查的專案編號 [1-${idx}，直接按 Enter 預設選 ${DEFAULT_PICK}]: " project_choice || PROJECT_AUTO_PICK="true"
+    read -r -p "👉 請輸入要檢查的專案編號 [1-${idx}，直接按 Enter 預設選 ${DEFAULT_PICK}]: " project_choice || true
+    [ -t 0 ] || PROJECT_AUTO_PICK="true"
     project_choice="${project_choice:-$DEFAULT_PICK}"
     if ! [[ "$project_choice" =~ ^[0-9]+$ ]] || [ "$project_choice" -lt 1 ] || [ "$project_choice" -gt "$idx" ]; then
       echo "⚠️ 編號 ${project_choice} 不在清單內，改用預設 [${DEFAULT_PICK}]。"
@@ -504,6 +505,7 @@ if should_run_item 2; then
         read -r -p "請輸入要加入為共同 Owner 的 Gmail 信箱: " new_owner_email
         if [ -z "$new_owner_email" ]; then
           echo "⏭️  [本次暫緩跳過] 沒有輸入信箱，不加入共同 Owner。"
+          MANUAL_TODO_LIST+=("細項 1-2 [新增共同 Owner]：本次沒有輸入信箱，請於 https://console.cloud.google.com/iam-admin/iam?project=${PROJECT_ID} 手動加入第二位 Owner。")
           DEFERRED_COUNT=$((DEFERRED_COUNT + 1))
           add_stage_log "| 細項 1-2 | 雙管理員（Owner）帳號共管 | ⏭️ 本次暫緩（未輸入信箱） |"
         elif ! [[ "$new_owner_email" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; then
@@ -706,7 +708,7 @@ if should_run_item 5 || should_run_item 6; then
       BACKUP_ENABLED="$(gcloud sql instances describe "$SQL_INSTANCE" --project="$PROJECT_ID" --format="value(settings.backupConfiguration.enabled)" 2>/dev/null || echo "Unknown")"
       CURRENT_TIER="$(gcloud sql instances describe "$SQL_INSTANCE" --project="$PROJECT_ID" --format="value(settings.tier)" 2>/dev/null || echo "Unknown")"
       ACTIVATION_POLICY="$(gcloud sql instances describe "$SQL_INSTANCE" --project="$PROJECT_ID" --format="value(settings.activationPolicy)" 2>/dev/null || echo "Unknown")"
-      PRIVATE_NETWORK="$(gcloud sql instances describe "$SQL_INSTANCE" --project="$PROJECT_ID" --format="value(settings.ipConfiguration.privateNetwork)" 2>/dev/null || echo "")"
+      PRIVATE_NETWORK="$(gcloud sql instances describe "$SQL_INSTANCE" --project="$PROJECT_ID" --format="value(settings.ipConfiguration.privateNetwork)" 2>/dev/null || echo "Unknown")"
     fi
 
     if should_run_item 5; then
@@ -724,6 +726,7 @@ if should_run_item 5 || should_run_item 6; then
       if [ "$IPV4_ENABLED" = "Unknown" ]; then
         echo "⚠️  [無法確認] 讀不到 Cloud SQL 的公網 IP 設定（gcloud 查詢失敗），不當作已關閉。"
         MANUAL_TODO_LIST+=("細項 2-2a [確認公網 IP]：腳本讀不到 ${SQL_INSTANCE} 的設定，請於 https://console.cloud.google.com/sql/instances?project=${PROJECT_ID} 確認公網 IP 是否已關閉。")
+        DEFERRED_COUNT=$((DEFERRED_COUNT + 1))
         add_stage_log "| 細項 2-2a | Cloud SQL 關閉對外公網 IP | ⚠️ 無法確認（讀取設定失敗） |"
       elif [ "$IPV4_ENABLED" = "False" ] || [ "$IPV4_ENABLED" = "false" ] || [ -z "$IPV4_ENABLED" ]; then
         echo "✅ [已存在，自動跳過] Cloud SQL 公網 IP (Public IP) 已關閉，外部網路無法直接掃描攻擊。"
@@ -732,7 +735,13 @@ if should_run_item 5 || should_run_item 6; then
       else
         echo "⚠️  [尚未設定] Cloud SQL 目前開啟了公網 IP (ipv4Enabled=${IPV4_ENABLED})！"
         if [ "$MODE" = "interactive" ]; then
-          if [ -z "$PRIVATE_NETWORK" ]; then
+          if [ "$PRIVATE_NETWORK" = "Unknown" ]; then
+            echo "⛔ 讀不到 ${SQL_INSTANCE} 的私有網路連線設定（gcloud 查詢失敗），為安全起見這次不動。"
+            DEFERRED_COUNT=$((DEFERRED_COUNT + 1))
+            MANUAL_TODO_LIST+=("細項 2-2a [關閉公網 IP]：腳本讀不到 ${SQL_INSTANCE} 的私有連線設定，請於 https://console.cloud.google.com/sql/instances?project=${PROJECT_ID} 確認後再關閉公網 IP。")
+            add_stage_log "| 細項 2-2a | Cloud SQL 關閉對外公網 IP | ⏭️ 讀不到私有連線設定，暫不關閉 |"
+            disable_ip="skip"
+          elif [ -z "$PRIVATE_NETWORK" ]; then
             echo "⛔ ${SQL_INSTANCE} 沒有設定私有網路連線（Private IP）：現在關掉公網 IP，網站會連不到資料庫，所以這次不動。請先設好私有連線再回來關。"
             DEFERRED_COUNT=$((DEFERRED_COUNT + 1))
             MANUAL_TODO_LIST+=("細項 2-2a [關閉公網 IP]：${SQL_INSTANCE} 尚無私有網路連線，請先於 https://console.cloud.google.com/sql/instances?project=${PROJECT_ID} 設好 Private IP 與 Cloud Run 的連線，再關閉公網 IP。")
@@ -894,7 +903,12 @@ if should_run_item 5 || should_run_item 6; then
               echo "   (實例已經是 db-g1-small，無須重設機型)"
               set --
             fi
-            if apply_db_plan "3A" "方案 3A：db-g1-small (1.7GB RAM)（上下班啟停排程需自行設定，否則約 NT\$780～880/月）" 480 560 \
+            if [ "$#" -eq 0 ] && [ "$MODE" != "dry-run" ]; then
+              echo "⏭️  [已符合，自動跳過] 已經是 db-g1-small，沒有變更；上下班啟停排程仍需自行設定。"
+              SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
+              add_stage_log "| 細項 2-3 | Cloud SQL 資料庫月租規格選型 | ✅ 已是 db-g1-small，未變更（排程需自行設定） |"
+              MANUAL_TODO_LIST+=("細項 2-3 [方案 3A 上下班啟停排程]：本腳本不會建立排程，請用 Cloud Scheduler 自行設定資料庫平日 08:00 開機、22:00 休眠；沒設定則約 NT\$780～880/月。")
+            elif apply_db_plan "3A" "方案 3A：db-g1-small (1.7GB RAM)（上下班啟停排程需自行設定，否則約 NT\$780～880/月）" 480 560 \
               "已選方案 3A：db-g1-small（排程需自行設定，否則約 NT\$780～880/月；目標 NT\$480～560/月）" \
               "$@"; then
               echo "💡 【上下班自動啟停與 EDM 排程提醒】：本腳本不會建立啟停排程。請自行設定平日 08:00–22:00 開機、其餘時段休眠，並把 EDM 發送排程設在 08:30–21:30 內，月租才會落在 NT\$480～560；沒設的話等同 24h 開機（約 NT\$780～880）。"

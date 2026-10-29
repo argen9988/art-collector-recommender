@@ -9,12 +9,15 @@ MJS="$R/lazy-pack/code-and-ai-audit.mjs"
 ST="$R/reports/.lazy-pack-state.env"
 FIX="$T/fixtures/fake-nextjs-app"
 mkdir -p "$R/reports"
-[ -f "$ST" ] && cp "$ST" "$S/state.bak"
+[ -f "$ST" ] && { cp "$ST" "$S/state.bak" || exit 2; }
+FULL="$R/reports/full-execution-report.md"
+[ -f "$FULL" ] && { cp "$FULL" "$S/full.bak" || exit 2; }
 touch "$S/start.marker"
 # 中途被中斷（Ctrl-C）也要還原使用者的狀態檔、關掉假伺服器、清暫存
 cleanup() {
   [ -n "${SRV:-}" ] && { kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; }
   if [ -f "$S/state.bak" ]; then cp "$S/state.bak" "$ST"; else rm -f "$ST"; fi
+  if [ -f "$S/full.bak" ]; then cp "$S/full.bak" "$FULL"; else rm -f "$FULL"; fi
   find "$R/reports" -maxdepth 1 -name 'stage-*-report-*.md' -newer "$S/start.marker" -delete 2>/dev/null
   rm -rf "${S:?}"
 }
@@ -255,7 +258,7 @@ if [ -s "$S/port" ]; then
   run --eval-only --url "$B/good?key=SECRETKEY#frag"; rc_is t8j2 $? 0
   nochk t8j2 "SECRETKEY"
   LATEST="$(find "$R/reports" -maxdepth 1 -name 'stage-3-report-*.md' -newer "$S/start.marker" | sort | tail -1)"
-  if [ -n "$LATEST" ] && ! grep -q "SECRETKEY" "$LATEST" && ! grep -q "SECRETKEY" "$R/reports/full-execution-report.md"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL [t8j2] 報告檔缺少或含查詢字串"; fi
+  if [ -n "$LATEST" ] && ! grep -q "SECRETKEY" "$LATEST" && [ -f "$R/reports/full-execution-report.md" ] && ! grep -q "SECRETKEY" "$R/reports/full-execution-report.md"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL [t8j2] 報告檔缺少或含查詢字串"; fi
   rm -f "$ST"
 else
   skip=$((skip+1)); echo "SKIP [t8] 假推薦 API 起不來"
@@ -283,7 +286,7 @@ for args in "--bogus" "--target" "--target --scan-only" "--source" "--repo" "--r
 done
 run --bogus < /dev/null
 chk t8k "不認得的選項"
-# 8l. --repo 網址帶帳密或特殊字元 → 擋下，不跑 git，畫面不出現帳密
+# 8l. --repo 網址帶帳密或特殊字元 → 結束碼 2、訊息正確，畫面不出現帳密
 run --repo "https://user:pw@github.com/x/y" < /dev/null; rc_is t8l $? 2
 chk t8l "不要放帳號密碼"
 nochk t8l "user:pw"
