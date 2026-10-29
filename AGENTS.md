@@ -6,6 +6,7 @@
 
 - 歸屬：公司
 - 完整紀錄位置：`D:\Dev\project-records\company\art-collector-recommender\`
+- 推送：自動
 
 ## 技術選型與理由
 
