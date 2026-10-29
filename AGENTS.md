@@ -13,7 +13,7 @@
 - **身分驗證**：無企業網域，採用 GCP OAuth Consent Screen `Testing` 模式白名單（Test Users Allowlist）搭配後端 `ALLOWED_EMAILS` 核驗，阻絕外部 Gmail 登入；排程路由 `/api/cron/send-edm` 另以 Secret Manager 之 `CRON_SECRET` 驗證（見 D2、D5）。
 - **自動化懶人包（Lazy Pack）與跨 AI 領航指南**：
   - 跨 AI 自動代操指南（`AGENT_SETUP_雲端資安設定與驗收指南.md`）：仿照 `ai-agent-ep04` 領航格式，供無資訊背景使用者將檔案或 GitHub 網址直接交給任何 AI Agent（Claude Code／ChatGPT App & Codex／Antigravity 2／Cursor／OpenCode）全程代操電腦完成三階段檢查、設定、費用精算與報告產出（見 D6）。
-  - 雲端分階段設定、體檢與費用精算（`lazy-pack/gcp-setup-and-check.sh`）：Bash 腳本，支援 `--stage 1|2|cost|all` 與 `--item 1..8` 分階段或挑單一細項執行（不押特定日期）；每個細項執行前先展示「6 點白話說明卡」並允許自由選做或跳過；細項 1-3 將「每月預算金額」與「AI 每日呼叫上限」設計為帶數值影響說明之互動問答題（預設原值 1,000）；內建「💰 雲端服務開啟清單與每月費用精算器」；每次執行自動輸出「單次階段執行報告」並更新「全部執行累計總報告（`reports/full-execution-report.md`）」（見 D3、D4、D5、D6）。
+  - 雲端分階段設定、體檢與費用精算（`lazy-pack/gcp-setup-and-check.sh`）：Bash 腳本，支援 `--stage 1|2|cost|all` 與 `--item 1..8` 分階段或挑單一細項執行（不押特定日期）；不帶 `--project` 時列出帳號下所有 GCP 專案供選擇，並探測、記下藏家推薦系統的 Cloud Run 網址（`reports/.lazy-pack-state.env` 的 `SAVED_CLOUD_RUN_URL`）；每個細項執行前先展示「6 點白話說明卡」並允許自由選做或跳過；細項 1-3 將「每月預算金額」與「AI 每日呼叫上限」設計為帶數值影響說明之互動問答題（預設原值 1,000）；內建「💰 雲端服務開啟清單與每月費用精算器」；每次執行自動輸出「單次階段執行報告」並更新「全部執行累計總報告（`reports/full-execution-report.md`）」（見 D3、D4、D5、D6）。
   - 本機程式碼掃描與 AI 紅隊測試（`lazy-pack/code-and-ai-audit.mjs`）：Node.js ESM 腳本，讀取 `config/params.json`，支援細項自由選擇（`--scan-only`、`--eval-only`、`--run-ai-eval`），執行靜態金鑰掃描與 20 題 LLM-as-a-Judge 推薦品質/防注入/EDM 收件人隱私驗收，並自動輸出第三階段單次報告與更新全部執行累計總報告（見 D4、D6）。
 
 ## 資料夾結構
@@ -28,6 +28,9 @@ art-collector-recommender/
 ├── lazy-pack/
 │   ├── gcp-setup-and-check.sh           # 雲端 GCP 分階段資安檢查、互動設定與費用精算腳本
 │   └── code-and-ai-audit.mjs            # 本機原始碼金鑰掃描與 AI 推薦品質驗收腳本
+├── tests/
+│   ├── test-gcp-setup.sh                # gcp-setup-and-check.sh 自動測試（假 gcloud 走真實分支＋dry-run）
+│   └── fakebin/gcloud                   # 假 gcloud：依參數回固定輸出並記下呼叫
 ├── reports/                             # 自動輸出之單次階段報告與全部階段執行累計總報告（不入版控）
 └── docs/
     ├── assessment-and-sop.md                     # 專案概況與六大資安規範 SOP 完整報告
@@ -66,5 +69,5 @@ art-collector-recommender/
 
 ## 改動後的驗證方式
 
-1. 修改 `lazy-pack/gcp-setup-and-check.sh` 後，用 Git Bash 的 `C:\Program Files\Git\bin\bash.exe -n lazy-pack/gcp-setup-and-check.sh` 驗證語法無誤，並用 `--dry-run` 模式測試 `--stage 1`、`--stage 2`、`--stage cost` 與報告輸出。
+1. 修改 `lazy-pack/gcp-setup-and-check.sh` 後，用 Git Bash 的 `C:\Program Files\Git\bin\bash.exe -n lazy-pack/gcp-setup-and-check.sh` 驗證語法無誤，跑 `bash tests/test-gcp-setup.sh`（PATH 前面放假 gcloud，走真實分支、不連雲端；現在 25 項），並用 `--dry-run` 模式測試 `--stage 1`、`--stage 2`、`--stage cost` 與報告輸出。`--dry-run` 碰到 gcloud 的地方都換成寫死的假值，只驗得到選單與報告，不能取代前者。
 2. 修改 `lazy-pack/code-and-ai-audit.mjs` 或 `config/params.json` 後，執行 `node lazy-pack/code-and-ai-audit.mjs --self-test` 確認參數讀取、靜態掃描、模擬閱卷與報告輸出皆通過。

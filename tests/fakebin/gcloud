@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# 假 gcloud：依參數回固定輸出，並把每次呼叫記到 FAKE_GCLOUD_LOG
+echo "$*" >> "${FAKE_GCLOUD_LOG:-/dev/null}"
+args="$*"
+case "$args" in
+  "config get-value project"*) echo "${FAKE_DEFAULT_PROJECT:-(unset)}" ;;
+  "projects list"*)
+    [ "${FAKE_NO_PROJECTS:-0}" = "1" ] && exit 0
+    printf "proj-a\t藏家推薦假專案\nproj-b\t練習假專案\nproj-c\t\n" ;;
+  "services list"*"--project=proj-a"*) echo "run.googleapis.com" ;;
+  "services list"*"--project=proj-c"*) echo "run.googleapis.com" ;;
+  "run services list"*"--project=proj-a"*)
+    printf "art-web\thttps://art-web-fake.a.run.app\nadmin-web\thttps://admin-web-fake.a.run.app\n" ;;
+  "run services list"*"--project=proj-c"*) : ;;
+  *) : ;;
+esac
+exit 0

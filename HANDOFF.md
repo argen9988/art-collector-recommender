@@ -1,46 +1,41 @@
-# 交接：新增 `AGENT_SETUP` 跨 AI 代操指南、三階段分流、預算問答、每月費用精算器與雙軌報告輸出並發布 GitHub
+# 交接：段 A 完成（GCP 專案選單、自動探測 Cloud Run 網址、假 gcloud 自動測試），接著做段 B
 
-> 寫於 2026-10-29 10:18（Windows，分支 master）。開工時說「開工」或打 /resume-work 讀這份。
+> 寫於 2026-10-29 11:48（Windows，分支 master）。開工時說「開工」或打 /resume-work 讀這份。
 
 ## 下一步
 
-1. 實作「自動定位藏家推薦系統目標」3 項機制（詳見 `D:\Dev\company\art-collector-recommender\docs\todo-plan.md`「## 零、 Lazy Pack 工具包補強與審閱待辦」）：(A) 在 `lazy-pack/gcp-setup-and-check.sh`（目前 1,021 行，讀改約第 225–250 行）新增 `gcloud projects list` 專案編號選單與自動探測 Cloud Run 服務網址；(B) 在 `lazy-pack/code-and-ai-audit.mjs`（目前 501 行，讀改約第 435–485 行）與 `AGENT_SETUP_雲端資安設定與驗收指南.md`、`README.md` 移除未帶 `--target` 預設掃自身目錄之盲點，新增三種原始碼來源自動定位（從 Cloud Run/Cloud Build 或 AI Studio 匯出下載、GitHub clone、本機搜尋）與 `--url` 線上網址 20 題紅隊測試。建議模型與努力程度：主力模型（Claude Sonnet 4.6 / Opus 4.6 或 Gemini Pro，中～高努力程度，涉及跨雲端與本機腳本互動設計）。
-2. 照 `review-changes` Skill 對 commit `2643155..HEAD`（含今日改動與上述自動定位機制，共 11 個檔案、約 1,650 行，依 400 行上限約切成 6 份材料）執行完整收尾審閱。建議模型與努力程度：主力模型（Sonnet 4.6 / Opus 4.6 或 Gemini Pro，中～高努力程度，審閱不可用 Flash 等小模型）。
-3. 將本機專用信件草稿（`D:\Dev\company\art-collector-recommender\docs\email-draft-to-director.md`）寄予資訊部長，並將公開 GitHub 領航指南網址交給執行者的 AI Agent 依序執行第一至第三階段與費用精算。建議模型與努力程度：Sonnet（中努力程度，協助核對信件與判讀腳本輸出）。
+1. 段 B1：改 `D:\Dev\company\art-collector-recommender\lazy-pack\code-and-ai-audit.mjs`（501 行，參數解析與掃描目標約第 435–485 行），沒帶 `--target` 時不再掃 Lazy Pack 自己，改成三種原始碼來源（雲端下載／AI Studio 匯出引導、GitHub clone、搜尋本機 Downloads／Desktop）的選單；同時在 `tests/` 加埋了假 `AIza` 金鑰的假 Next.js 專案與一支測試，用故意改壞的複本確認抓得到。規格見 `D:\Dev\company\art-collector-recommender\docs\todo-plan.md`「## 零、 Lazy Pack 工具包補強與審閱待辦」第 1、3 點。估：讀 mjs 501＋新寫約 150＋測試約 150 ≈ 800 行，所以 `--url` 切到 B2。建議模型與努力程度：主力模型（Opus），中～高，要上線的程式。
+2. 段 B2：`--url` 線上 20 題測試（沒帶時讀狀態檔 `SAVED_CLOUD_RUN_URL`）＋假推薦 API 小伺服器的測試（同一節第 2、3 點）。估約 500 行。建議模型與努力程度：主力模型，中。
+3. 段 C：同步 `AGENT_SETUP_雲端資安設定與驗收指南.md`、`README.md`（同一節第 4 點，約 450 行），之後照 `review-changes` 審 `2643155..HEAD`，最後由使用者用拋棄式 GCP 專案跑一輪（D7 第 ③ 層）。建議模型與努力程度：文件同步用 Sonnet、medium；審閱用主力模型。
 
 ## 目標與做到哪
 
-建立 `art-collector-recommender` 公司專案，完成雲端資安評估 SOP、排程發送客製化 EDM 開發者實作指南、跨 AI 自動代操指南（`AGENT_SETUP_雲端資安設定與驗收指南.md`）與方案 C 自動化檢查設定懶人包（Lazy Pack），並發布至公開 GitHub repo `argen9988/art-collector-recommender`。目前待補強「自動定位藏家推薦系統目標（雲端專案選單＋原始碼三來源抓取）」後一併執行 `review-changes` 審閱。
+讓沒有資訊背景的執行者把 Lazy Pack 交給 AI Agent，就能自動找到正確的 GCP 專案、網站與原始碼，跑完三階段檢查。段 A（雲端專案選單＋Cloud Run 網址）做完並有自動測試；段 B（第三階段原始碼定位與線上測試）、段 C（文件、審閱、真雲端驗收）還沒做。
 
 ## 已完成
 
-- 建立專案結構、資安評估與六大設定 SOP 報告及方案 C Lazy Pack 腳本（`art-collector-recommender` `0e995ce`）
-- 將第 8 關（排程發送客製化 EDM 之 Cloud Scheduler 檢查）與第 7 關（啟用 Vertex AI）並列為非必要選配項，並新增《排程發送客製化 EDM 開發者實作指南與收費標準說明》（`art-collector-recommender` `e4ffa2a`、`25b55f1`、`1083b80`）
-- 新增 `AGENT_SETUP_雲端資安設定與驗收指南.md`（含建議模型與努力程度表）、支援 `--stage 1|2|cost|all` 與細項自由選做（含 6 點白話說明卡）、預算與 AI 每日呼叫上限互動問答題、每月費用精算器與 `reports/` 雙軌報告輸出，並將部長信件草稿拆出至 `.gitignore`，發布至公開 GitHub `argen9988/art-collector-recommender`（`art-collector-recommender` `09bfd7e`、`0523d90`、`0dac5b3`）
+- 段 A：`gcp-setup-and-check.sh` 專案選單、自動探測 Cloud Run 網址並寫入狀態檔與報告、`--project`、拿掉 `gcloud config set project`；`tests/test-gcp-setup.sh` 25 項全過、改壞複本測得出來（這次的 commit）
+- 給資訊部長的信：使用者已自行寄出
 
 ## 還沒做完
 
-- 實作「自動定位藏家推薦系統目標（GCP 專案選單＋Cloud Run/AI Studio 原始碼自動抓取與 `--target` 防呆＋`--url` 線上端點測試）」（見 `D:\Dev\company\art-collector-recommender\docs\todo-plan.md`「## 零、 Lazy Pack 工具包補強與審閱待辦」）
-- 對 commit `2643155..HEAD` 執行 `review-changes` 審閱（待自動定位機制完成後一併審閱）
-- 第一階段至第三階段之實際 GCP 雲端設定與系統整合驗收待辦（見 `D:\Dev\company\art-collector-recommender\docs\todo-plan.md`）
+- 段 B1、B2、C 與審閱、真雲端驗收（見 `D:\Dev\company\art-collector-recommender\docs\todo-plan.md`「## 零、 Lazy Pack 工具包補強與審閱待辦」）
+- 第一至第三階段的實際 GCP 設定與整合驗收（見同一份 todo-plan 的各階段段落）
 
 ## 這次定下的決策
 
-- D1～D5：維持 Google AI Studio Paid Tier、雙 Owner 共管與軟硬止損、Cloud SQL 6 方案選單、方案 C 二合一 Lazy Pack、Vertex AI 與排程 EDM 並列選配項（完整的在 `D:\Dev\company\art-collector-recommender\docs\decisions\2026-10.md`）
-- D6：導入 `AGENT_SETUP` 跨 AI 代操領航指南、三階段不押日期與細項可選、預算配額互動問答、每月費用精算器與雙軌報告輸出（完整的在 `D:\Dev\company\art-collector-recommender\docs\decisions\2026-10.md`）
+- D7：整套流程分三層驗證（dry-run 只驗選單與報告；假 gcloud／假專案／假 API 收進 `tests/` 每次跑；拋棄式真 GCP 專案在三段與審閱完成後跑一次）（完整的在 `D:\Dev\company\art-collector-recommender\docs\decisions\2026-10.md`）
 
 ## 相關檔案
 
-- `D:\Dev\company\art-collector-recommender\AGENT_SETUP_雲端資安設定與驗收指南.md`：給所有 AI Agent 讀的無腦代操領航指南
-- `D:\Dev\company\art-collector-recommender\AGENTS.md`：專案開發規範、架構定義與公私歸屬標記
-- `D:\Dev\company\art-collector-recommender\README.md`：Lazy Pack 快速啟動說明、白話口令、6 種 DB 方案與費用精算表
-- `D:\Dev\company\art-collector-recommender\config\params.json`：預算、配額、EDM 單日上限與 20 題驗收門檻設定檔
-- `D:\Dev\company\art-collector-recommender\lazy-pack\gcp-setup-and-check.sh`：雲端分階段資安檢查、互動設定與費用精算腳本
-- `D:\Dev\company\art-collector-recommender\lazy-pack\code-and-ai-audit.mjs`：本機原始碼金鑰掃描與 20 題 AI 推薦紅隊測試腳本
-- `D:\Dev\company\art-collector-recommender\docs\todo-plan.md`：待辦清單（含下次開工優先實作之「自動定位藏家推薦系統目標」規格）
-- `D:\Dev\company\art-collector-recommender\docs\email-draft-to-director.md`：給資訊部長的專案彙報信件草稿（僅留本機，已列入 `.gitignore`）
+- `D:\Dev\company\art-collector-recommender\lazy-pack\code-and-ai-audit.mjs`：段 B 要改的腳本
+- `D:\Dev\company\art-collector-recommender\tests\test-gcp-setup.sh`、`D:\Dev\company\art-collector-recommender\tests\fakebin\gcloud`：段 A 的測試，段 B 的測試照這個寫法
+- `D:\Dev\company\art-collector-recommender\lazy-pack\gcp-setup-and-check.sh`：狀態檔 `reports/.lazy-pack-state.env` 寫入 `SAVED_PROJECT_ID`、`SAVED_CLOUD_RUN_SERVICE`、`SAVED_CLOUD_RUN_URL` 的地方在檔尾 `cat > "$STATE_FILE"`
+- `D:\Dev\company\art-collector-recommender\docs\todo-plan.md`：段 B、C 的規格
 
 ## 踩過的坑
 
-- `code-and-ai-audit.mjs` 未傳 `--target` 時原本預設掃描 `REPO_ROOT`（即 Lazy Pack 自身目錄），且 `gcp-setup-and-check.sh` 原本只讀 `gcloud config get-value project`，對無資訊背景且程式碼在 AI Studio 雲端的使用者不夠自動；已列入 `docs/todo-plan.md` 下次開工第 1 步修正
-- Bash 腳本在 `set -u` 模式下讀取含 `NT$1000` 字串的 `.env` 狀態檔時，若用 `source` 會將 `$1000` 當成 `$1` 展開而報 `$1: unbound variable`；已改為 `IFS='=' read -r` 安全解析
+- `--dry-run` 碰到 gcloud 的地方都換成寫死的假值，真正呼叫 gcloud 的分支只能靠假 gcloud 測（已寫進 `AGENTS.md`「改動後的驗證方式」）
+- `read -p` 在輸入不是終端機（管線、AI Agent 代跑）時不印提示文字，測試不要比對提示，改看實際結果
+- 段 B 的假 `AIza` 金鑰要在測試執行時才組出來（例如字串相接），不要整串寫進檔案，否則會被 commit 前的帳密掃描擋下或誤報
+- 測試會覆寫 `reports/.lazy-pack-state.env`，`tests/test-gcp-setup.sh` 跑前備份、跑完還原；段 B 的測試照做

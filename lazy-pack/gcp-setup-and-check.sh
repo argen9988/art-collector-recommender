@@ -19,6 +19,7 @@
 #   bash gcp-setup-and-check.sh --stage all           # 一次跑完第一、二階段與費用精算
 #   bash gcp-setup-and-check.sh --item <1-8>          # 只挑單一細項（關卡 1~8）執行
 #   bash gcp-setup-and-check.sh --check-only          # 純唯讀體檢模式（只檢查與出報告，不修改任何設定）
+#   bash gcp-setup-and-check.sh --project <ID>        # 直接指定 GCP 專案（不帶時自動列出帳號下所有專案供選擇）
 #   bash gcp-setup-and-check.sh --dry-run             # 模擬測試模式（無 gcloud 環境下驗證流程、選單與報告輸出）
 # ==============================================================================
 
@@ -27,6 +28,7 @@ set -u
 MODE="interactive"
 TARGET_STAGE="menu"
 TARGET_ITEM=""
+PROJECT_ID=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -48,8 +50,15 @@ while [ $# -gt 0 ]; do
       TARGET_ITEM="${1#*=}"
       TARGET_STAGE="item-${TARGET_ITEM}"
       ;;
+    --project)
+      shift
+      PROJECT_ID="${1:-}"
+      ;;
+    --project=*)
+      PROJECT_ID="${1#*=}"
+      ;;
     -h|--help)
-      echo "用法: bash $0 [--stage 1|2|cost|all] [--item 1..8] [--check-only] [--dry-run]"
+      echo "用法: bash $0 [--stage 1|2|cost|all] [--item 1..8] [--project <Project ID>] [--check-only] [--dry-run]"
       exit 0
       ;;
   esac
@@ -230,17 +239,116 @@ if [ "$MODE" != "dry-run" ] && ! command -v gcloud >/dev/null 2>&1; then
   exit 2
 fi
 
-# 取得目前 GCP Project ID
-if [ "$MODE" = "dry-run" ]; then
-  PROJECT_ID="demo-art-collector-proj"
-else
-  PROJECT_ID="$(gcloud config get-value project 2>/dev/null || true)"
-  if [ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "(unset)" ]; then
-    read -r -p "請輸入您的 GCP Project ID: " PROJECT_ID
-    gcloud config set project "$PROJECT_ID"
+# ------------------------------------------------------------------------------
+# 自動定位目標 GCP 專案與 Cloud Run 網址（列出帳號下所有專案供選擇，不需手輸 Project ID）
+# ------------------------------------------------------------------------------
+# 列出某專案下的 Cloud Run 服務（每行「服務名稱<TAB>網址」）；未啟用 Cloud Run API 時回傳空白，不觸發啟用提示
+list_cloud_run_services() {
+  local pid="$1"
+  if [ "$MODE" = "dry-run" ]; then
+    [ "$pid" = "demo-art-collector-proj" ] && printf "art-collector-web\thttps://art-collector-web-demo-uc.a.run.app\n"
+    return 0
+  fi
+  if gcloud services list --enabled --project="$pid" --filter="config.name:run.googleapis.com" --format="value(config.name)" 2>/dev/null | grep -q "run.googleapis.com"; then
+    gcloud run services list --project="$pid" --platform=managed --format="value(metadata.name,status.url)" --quiet 2>/dev/null || true
+  fi
+}
+
+DEFAULT_GCLOUD_PROJECT=""
+if [ "$MODE" != "dry-run" ]; then
+  DEFAULT_GCLOUD_PROJECT="$(gcloud config get-value project 2>/dev/null || true)"
+  [ "$DEFAULT_GCLOUD_PROJECT" = "(unset)" ] && DEFAULT_GCLOUD_PROJECT=""
+fi
+
+if [ -z "$PROJECT_ID" ]; then
+  if [ "$MODE" = "dry-run" ]; then
+    PROJECT_LINES="$(printf "demo-art-collector-proj\t藏家推薦系統（模擬）\ndemo-sandbox-proj\t個人練習專案（模擬）\n")"
+  else
+    echo "🔎 正在列出您帳號下的所有 GCP 專案，並探測哪個專案有運行中的 Cloud Run 網站..."
+    PROJECT_LINES="$(gcloud projects list --format="value(projectId,name)" --sort-by=projectId 2>/dev/null || true)"
+  fi
+  if [ -z "$PROJECT_LINES" ]; then
+    echo "❌ 這個帳號下找不到任何 GCP 專案！請確認已用正確的 Google 帳號登入（gcloud auth login），或改用 --project <Project ID> 指定。"
+    exit 2
+  fi
+
+  PROJECT_IDS=()
+  DEFAULT_PICK=""
+  RUN_PROJECT_TOTAL=0
+  RUN_PROJECT_PICK=""
+  idx=0
+  echo ""
+  echo "📋 您帳號下的 GCP 專案清單："
+  while IFS=$'\t' read -r p_id p_name; do
+    p_name="${p_name%$'\r'}"
+    [ -z "$p_id" ] && continue
+    idx=$((idx + 1))
+    PROJECT_IDS+=("$p_id")
+    run_lines="$(list_cloud_run_services "$p_id")"
+    run_count=0
+    [ -n "$run_lines" ] && run_count="$(printf "%s\n" "$run_lines" | grep -c .)"
+    tags=""
+    if [ "$run_count" -gt 0 ]; then
+      tags="  🌐 有 ${run_count} 個 Cloud Run 網站"
+      RUN_PROJECT_TOTAL=$((RUN_PROJECT_TOTAL + 1))
+      RUN_PROJECT_PICK="$idx"
+    fi
+    if [ -n "$DEFAULT_GCLOUD_PROJECT" ] && [ "$p_id" = "$DEFAULT_GCLOUD_PROJECT" ]; then
+      tags="${tags}  ⭐ 目前 gcloud 預設專案"
+      DEFAULT_PICK="$idx"
+    fi
+    echo "   [${idx}] ${p_name:-（未命名）}（Project ID：${p_id}）${tags}"
+  done <<< "$PROJECT_LINES"
+
+  # 預設選擇：只有一個專案有 Cloud Run 網站時選它；否則選 gcloud 預設專案；再不然選第 1 個
+  if [ "$RUN_PROJECT_TOTAL" -eq 1 ]; then
+    DEFAULT_PICK="$RUN_PROJECT_PICK"
+  fi
+  [ -z "$DEFAULT_PICK" ] && DEFAULT_PICK=1
+
+  project_choice=1
+  if [ "$idx" -gt 1 ]; then
+    project_choice=""
+    read -r -p "👉 請輸入要檢查的專案編號 [1-${idx}，直接按 Enter 預設選 ${DEFAULT_PICK}]: " project_choice || true
+    project_choice="${project_choice:-$DEFAULT_PICK}"
+    if ! [[ "$project_choice" =~ ^[0-9]+$ ]] || [ "$project_choice" -lt 1 ] || [ "$project_choice" -gt "$idx" ]; then
+      echo "⚠️ 編號 ${project_choice} 不在清單內，改用預設 [${DEFAULT_PICK}]。"
+      project_choice="$DEFAULT_PICK"
+    fi
+  fi
+  PROJECT_ID="${PROJECT_IDS[$((project_choice - 1))]}"
+  if [ "$RUN_PROJECT_TOTAL" -eq 0 ]; then
+    echo "⚠️ 所有專案都沒有探測到 Cloud Run 網站：可能網站還在 Google AI Studio 尚未部署，或 Cloud Run API 未啟用。腳本照常檢查所選專案。"
   fi
 fi
+
+# 探測所選專案的 Cloud Run 網址（存進狀態檔，供第三階段 --url 線上實測讀取）
+CLOUD_RUN_SERVICE=""
+CLOUD_RUN_URL=""
+RUN_LINES="$(list_cloud_run_services "$PROJECT_ID")"
+if [ -n "$RUN_LINES" ]; then
+  RUN_TOTAL="$(printf "%s\n" "$RUN_LINES" | grep -c .)"
+  run_choice=1
+  if [ "$RUN_TOTAL" -gt 1 ]; then
+    echo "🌐 專案 ${PROJECT_ID} 下有 ${RUN_TOTAL} 個 Cloud Run 網站："
+    printf "%s\n" "$RUN_LINES" | awk -F'\t' '{ printf "   [%d] %s → %s\n", NR, $1, $2 }'
+    run_choice=""
+    read -r -p "👉 哪一個是藏家推薦系統？[1-${RUN_TOTAL}，直接按 Enter 預設選 1]: " run_choice || true
+    run_choice="${run_choice:-1}"
+    if ! [[ "$run_choice" =~ ^[0-9]+$ ]] || [ "$run_choice" -lt 1 ] || [ "$run_choice" -gt "$RUN_TOTAL" ]; then
+      run_choice=1
+    fi
+  fi
+  CLOUD_RUN_SERVICE="$(printf "%s\n" "$RUN_LINES" | sed -n "${run_choice}p" | cut -f1)"
+  CLOUD_RUN_URL="$(printf "%s\n" "$RUN_LINES" | sed -n "${run_choice}p" | cut -f2 | tr -d '\r')"
+fi
+
 echo "📌 目標 GCP 專案：${PROJECT_ID} | 本次執行範圍：${TARGET_STAGE}"
+if [ -n "$CLOUD_RUN_URL" ]; then
+  echo "🌐 藏家推薦系統網址：${CLOUD_RUN_URL}（Cloud Run 服務 ${CLOUD_RUN_SERVICE}，已記下供第三階段 --url 線上實測使用）"
+else
+  echo "🌐 這個專案沒有探測到 Cloud Run 網站（第三階段可改用本機原始碼檢查）。"
+fi
 echo ""
 
 # 計數器與單次報告明細陣列
@@ -927,6 +1035,9 @@ SAVED_EDM_MAX_NTD=${SAVED_EDM_MAX_NTD}
 SAVED_SECRET_COUNT=${SAVED_SECRET_COUNT}
 SAVED_BUDGET_MONTHLY_NTD=${BUDGET_MONTHLY_NTD}
 SAVED_API_QUOTA_RPD=${API_QUOTA_RPD}
+SAVED_PROJECT_ID="${PROJECT_ID}"
+SAVED_CLOUD_RUN_SERVICE="${CLOUD_RUN_SERVICE}"
+SAVED_CLOUD_RUN_URL="${CLOUD_RUN_URL}"
 EOF
 
 TIMESTAMP="$(date '+%Y%m%d-%H%M%S')"
@@ -939,6 +1050,7 @@ FULL_REPORT_FILE="${REPORTS_DIR}/full-execution-report.md"
   echo ""
   echo "- **執行時間**：${HUMAN_TIME}"
   echo "- **目標 GCP 專案**：\`${PROJECT_ID}\`"
+  echo "- **藏家推薦系統網址（Cloud Run）**：${CLOUD_RUN_URL:-未探測到（第三階段改用本機原始碼檢查）}"
   echo "- **執行模式**：\`${MODE}\`（階段參數：\`${TARGET_STAGE}\`）"
   echo "- **統計摘要**：已符合跳過 **${SKIPPED_COUNT}** 項 ｜ 本次完成調整 **${FIXED_COUNT}** 項 ｜ 本次暫緩跳過 **${DEFERRED_COUNT}** 項 ｜ 待網頁確認 **${#MANUAL_TODO_LIST[@]}** 項"
   echo ""
@@ -985,6 +1097,7 @@ FULL_REPORT_FILE="${REPORTS_DIR}/full-execution-report.md"
   echo ""
   echo "- **最後更新時間**：${HUMAN_TIME}"
   echo "- **目標 GCP 專案**：\`${PROJECT_ID}\`"
+  echo "- **藏家推薦系統網址（Cloud Run）**：${CLOUD_RUN_URL:-未探測到（第三階段改用本機原始碼檢查）}"
   echo "- **目前設定之每月預算警示上限**：**NT\$${BUDGET_MONTHLY_NTD} / 月**（軟止損提醒鈴）"
   echo "- **目前鎖定之 AI 每日呼叫硬上限**：**${API_QUOTA_RPD} 次 / 日**（硬止損保險絲，每分鐘上限 ${API_QUOTA_RPM} 次）"
   echo ""
