@@ -17,7 +17,7 @@
     4. 資料庫：關公網 IP 前 describe 確認有私有連線並告知重啟；describe 失敗（`Unknown`）單獨一種狀態、不當已關閉；方案 2～6 patch 前加 y/N 與「會重啟、儲存空間不可縮減」；方案 3A 排程沒建立，要標示「需自行設定，否則約 NT$780～880」、不計入已完成；方案 1 依 tier 對應月租、未知標「未知」；方案 2／5／6 的儲存與備份天數，改 README 與選單描述（不改雲端行為）；dry-run 的 `IPV4_ENABLED` 等給固定模擬值。
     5. 非互動且多個專案、未給 `--project`：印出自動選了哪個或 `exit 2` 請改用 `--project`；專案迴圈內的 gcloud 加 `</dev/null`。
     6. 費用：封頂合計加 Cloud Run 上限 50（570～910）；`--check-only` 且未啟用 EDM 時更新 `SAVED_EDM_STATUS`／`SAVED_EDM_MAX_NTD`。
-  - **`lazy-pack/code-and-ai-audit.mjs`**
+  - **`lazy-pack/code-and-ai-audit.mjs`**（✅ 5 組已改完、`test-code-audit.sh` 166 項與 `--self-test` 全過；新增測試留在文件與測試那組）
     1. `runCmd` 在 Windows 用 `shell: true` 且參數只包雙引號：`--repo` 網址檢查改白名單，拒絕含 `" & | < > ^ %` 與空白；`extractZip` 的 PowerShell 命令改用環境變數傳路徑（或拒絕含 `'`、`"`、`%`）。
     2. `git clone` 網址含帳密就拒絕，印網址與 stderr 前遮蔽 `//…@`；`resolveEvalEndpoint` 的錯誤訊息只印 `?`、`#` 之前並遮帳密（第 305、310 行）。
     3. `--self-test` 不寫真實 `reports/.lazy-pack-state.env`（`writeReports` 約第 500～512 行）。

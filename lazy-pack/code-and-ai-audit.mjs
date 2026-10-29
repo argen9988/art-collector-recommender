@@ -27,6 +27,8 @@
  *   回 JSON { recommendations: [{ id, price_ntd }], cc_list: [], blocked, message }；回純文字時只能判防注入題
  *   網站要登入時，把 token 放環境變數 LAZY_PACK_API_TOKEN，會送 Authorization: Bearer <token>
  *
+ * 結束碼：0 = 通過；1 = 檢查沒過（或 --self-test 失敗）；2 = 來源或參數有問題（找不到原始碼、未知選項、缺值等）
+ *
  * 原始碼三種來源（沒帶 --target 時）：
  *   [A] cloud ：程式碼還在雲端 → 從第一階段記下的專案找 Cloud Build 上傳的原始碼下載；找不到就引導從 Google AI Studio 下載 ZIP／匯出 GitHub
  *   [B] github：貼 GitHub 網址 → git clone 到 reports/sources/
@@ -103,7 +105,14 @@ function loadParams() {
 // -----------------------------------------------------------------------------
 // 2. 細項 3-1：靜態原始碼資安掃描 (SAST：先檢查現況，已符合自動跳過)
 // -----------------------------------------------------------------------------
-const IGNORE_DIRS = new Set(['node_modules', '.git', '.next', 'dist', 'build', '.venv', '__pycache__', 'reports']);
+const samePath = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
+
+// 印出網址前：遮掉 //帳號:密碼@，並去掉 ? 與 # 之後的內容（可能夾金鑰）
+const redactUrl = (u) => String(u).replace(/\/\/[^/@\s]*@/g, '//***@').replace(/[?#].*$/s, '');
+// 印 git 的錯誤訊息前：遮掉 //…@
+const redactText = (t) => String(t).replace(/\/\/[^/@\s]*@/g, '//***@');
+
+const IGNORE_DIRS = new Set(['node_modules', '.git', '.next', 'dist', 'build', '.venv', '__pycache__']); // reports 只忽略專案自己的 REPORTS_DIR（見 collectFiles）
 const CODE_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.env', '.json', '.md']);
 
 function collectFiles(dir, fileList = []) {
@@ -111,6 +120,7 @@ function collectFiles(dir, fileList = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (IGNORE_DIRS.has(entry.name)) continue;
     const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory() && samePath(path.resolve(fullPath), REPORTS_DIR)) continue;
     if (entry.isDirectory()) {
       collectFiles(fullPath, fileList);
     } else if (CODE_EXTS.has(path.extname(entry.name)) || entry.name.startsWith('.env')) {
@@ -302,12 +312,12 @@ function resolveEvalEndpoint(cliArgs, state) {
   if (!raw) return { ok: true, mode: 'mock', why: '沒有網站網址；要測真實網站請加 --url "<Cloud Run 網址>"，或先跑第一階段記下網址' };
   let u;
   try { u = new URL(raw); } catch { u = null; }
-  if (!u || !/^https?:$/.test(u.protocol)) return { ok: false, msg: `看不懂這個網址「${raw}」（${from}），要是 https:// 開頭的完整網址。` };
+  if (!u || !/^https?:$/.test(u.protocol)) return { ok: false, msg: `看不懂這個網址「${redactUrl(raw)}」（${from}），要是 https:// 開頭的完整網址。` };
   if (u.username || u.password) return { ok: false, msg: '網址裡不要放帳號密碼；要登入請把 token 放進環境變數 LAZY_PACK_API_TOKEN。' };
   const apiPath = valueOf('--api-path') || '/api/recommend';
   // Git Bash 會把 /v2/rec 這種參數改成 C:/Program Files/Git/v2/rec
-  if (/^[A-Za-z]:[\\/]/.test(apiPath)) return { ok: false, msg: `--api-path 收到「${apiPath}」，看起來被 Git Bash 改成 Windows 路徑了；請改寫成不加開頭斜線的 v2/rec 這種寫法。` };
-  if (/:\/\/|[?#]/.test(apiPath)) return { ok: false, msg: `--api-path 只能是路徑（例如 /api/recommend），收到「${apiPath}」。` };
+  if (/^[A-Za-z]:[\\/]/.test(apiPath)) return { ok: false, msg: `--api-path 收到「${redactUrl(apiPath)}」，看起來被 Git Bash 改成 Windows 路徑了；請改寫成不加開頭斜線的 v2/rec 這種寫法。` };
+  if (/:\/\/|[?#]/.test(apiPath)) return { ok: false, msg: `--api-path 只能是路徑（例如 /api/recommend），收到「${redactUrl(apiPath)}」。` };
   // 只留網址的來源與路徑；查詢字串、# 後面的不留，免得金鑰類參數被印出或寫進報告
   const base = (u.origin + u.pathname).replace(/\/+$/, '');
   const endpoint = base + (apiPath.startsWith('/') ? apiPath : `/${apiPath}`);
@@ -509,7 +519,7 @@ function writeReports(params, runScan, runEval, codeResult, aiResult, targetDir,
   const envContent = Object.entries(state)
     .map(([k, v]) => (typeof v === 'number' ? `${k}=${v}` : `${k}="${v}"`))
     .join('\n') + '\n';
-  fs.writeFileSync(STATE_FILE, envContent, 'utf-8');
+  if (!isSelfTest) fs.writeFileSync(STATE_FILE, envContent, 'utf-8'); // 自我測試不動真實狀態檔
 
   const singleReportPath = path.join(REPORTS_DIR, `stage-3-report-${ts}.md`);
   const fullReportPath = path.join(REPORTS_DIR, 'full-execution-report.md');
@@ -603,8 +613,6 @@ function runCmd(cmd, cmdArgs, opts = {}) {
   return { ok: r.status === 0, stdout: (r.stdout || '').trim(), stderr: (r.stderr || '').trim() };
 }
 
-const samePath = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
-
 // 回傳 { ok, dir, msg, warn }：資料夾要存在、不是 Lazy Pack 自己或它的上層、裡面要有程式碼檔
 function validateTarget(dir) {
   if (!fs.existsSync(dir)) return { ok: false, msg: `找不到資料夾：${dir}` };
@@ -643,11 +651,19 @@ function newSourceDir(name) {
 }
 
 function extractZip(zipPath) {
+  // Windows 的命令列會經 cmd.exe：路徑含這些字元就拒絕，避免被當成指令
+  if (/["&|<>^%]/.test(zipPath)) {
+    console.log(`❌ ZIP 路徑含特殊字元（" & | < > ^ %），為安全起見不解壓縮：${zipPath}（請改名或手動解壓縮後用 --target 指定資料夾）`);
+    return null;
+  }
   const dest = newSourceDir(path.basename(zipPath, path.extname(zipPath)));
+  // PowerShell 的路徑走環境變數，不拼進命令字串
+  process.env.LAZY_PACK_ZIP = zipPath;
+  process.env.LAZY_PACK_ZIP_DEST = dest;
   const attempts = [
     ['unzip', ['-q', '-o', zipPath, '-d', dest]],
     ...(process.platform === 'win32'
-      ? [['powershell', ['-NoProfile', '-Command', `Expand-Archive -LiteralPath '${zipPath}' -DestinationPath '${dest}' -Force`]]]
+      ? [['powershell', ['-NoProfile', '-Command', 'Expand-Archive -LiteralPath $env:LAZY_PACK_ZIP -DestinationPath $env:LAZY_PACK_ZIP_DEST -Force']]]
       : [['ditto', ['-x', '-k', zipPath, dest]]]),
   ];
   for (const [cmd, cmdArgs] of attempts) {
@@ -701,15 +717,24 @@ function fetchFromCloud(state) {
 async function fetchFromGithub(repoUrl) {
   const url = repoUrl || (await ask(' 🔗 請貼上 GitHub 網址（例如 https://github.com/公司帳號/art-collector-web）：'));
   if (!/^(https:\/\/|git@|file:\/\/)\S+$/.test(url)) {
-    console.log(`❌ 看不懂這個網址：「${url}」（要 https:// 或 git@ 開頭）`);
+    console.log(`❌ 看不懂這個網址：「${redactUrl(url)}」（要 https:// 或 git@ 開頭）`);
+    return null;
+  }
+  // 命令會經 cmd.exe（Windows）：含這些字元就拒絕
+  if (/["&|<>^%]/.test(url)) {
+    console.log('❌ 網址含特殊字元（" & | < > ^ %），不下載。');
+    return null;
+  }
+  if (/^(https|file):\/\/[^/]*@/.test(url)) {
+    console.log('❌ 網址裡不要放帳號密碼；私人 repo 請先 gh auth login，或改下載 ZIP 後選 [C]。');
     return null;
   }
   const name = url.replace(/\.git$/, '').split(/[/:]/).filter(Boolean).pop() || 'repo';
   const dest = newSourceDir(name);
-  console.log(` ⬇️ 下載中：git clone --depth 1 ${url}`);
+  console.log(` ⬇️ 下載中：git clone --depth 1 ${redactUrl(url)}`);
   const r = runCmd('git', ['clone', '--depth', '1', url, dest]);
   if (!r.ok) {
-    console.log(`❌ 下載失敗：${r.stderr.split(/\r?\n/).slice(-2).join(' ')}`);
+    console.log(`❌ 下載失敗：${redactText(r.stderr).split(/\r?\n/).slice(-2).join(' ')}`);
     console.log('   私人 repo 要先登入 GitHub（gh auth login），或改從 GitHub 網頁「Code → Download ZIP」下載後選 [C]。');
     return null;
   }
