@@ -4,6 +4,16 @@
 
 ---
 
+## 零、 Lazy Pack 工具包補強與審閱待辦（下次開工優先執行）
+
+- [ ] **【工具補強】新增「自動定位藏家推薦系統目標（雲端專案選單＋原始碼三來源自動抓取＋線上網址實測）」**（2026-10-29 確認）：
+  1. **雲端 GCP 專案自動搜尋與選單（修改 `lazy-pack/gcp-setup-and-check.sh`）**：登入後自動執行 `gcloud projects list` 列出帳號下所有 GCP 專案名稱與 Project ID 編號選單 `[1] [2] ...`，並自動探測標記哪個專案下有運行 Cloud Run 服務與網址，避免使用者手輸 Project ID 或審錯專案。
+  2. **第三階段原始碼三種來源自動定位與防呆（修改 `lazy-pack/code-and-ai-audit.mjs` 與 `AGENT_SETUP_雲端資安設定與驗收指南.md`）**：移除未傳 `--target` 時預設掃描 Lazy Pack 自身目錄之盲點，改為互動選單與 AI Agent 自動代操三種來源：(A) 程式碼仍在雲端時，由 AI Agent 透過 `gcloud run services describe` / Cloud Build Source 自動下載或引導從 Google AI Studio 點選 Download ZIP / 匯出 GitHub；(B) 貼入 GitHub 網址自動 `git clone`；(C) 自動搜尋本機 `Downloads`/`Desktop` 專案資料夾供使用者點選。
+  3. **支援線上 Cloud Run 網址 / API 端點實測（修改 `lazy-pack/code-and-ai-audit.mjs`）**：支援帶入 `--url "<Cloud Run 網址>"`（或從第一階段自動探測之網址讀取），以 20 題假資料對真實線上推薦端點進行紅隊驗收。
+- [ ] **【收尾審閱】執行 `review-changes` 審閱**：待上述自動定位機制實作完成後，一併對 `2643155..HEAD` 執行 `review-changes` 完整審閱。
+
+---
+
 ## 第一階段：立即止血與基礎防護（對應 `gcp-setup-and-check.sh --stage 1`）
 
 - [ ] **【細項 1-1】確認 GCP 專案綁定 Billing（切換 Paid Tier）**：確認專案處於 `Pay-as-you-go`，保障藏家資料 100% 不被用於模型訓練。
