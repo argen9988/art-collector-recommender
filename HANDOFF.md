@@ -1,10 +1,10 @@
-# 交接：段 D1 審閱完並修正（D11）；下一步可選再審一輪修正，再做段 D2
+# 交接：段 D1 審閱完並修正（D11）；下一步再審一輪修正，再做段 D2
 
 > 寫於 2026-10-30 18:00（Windows，分支 master）。開工時說「開工」或打 /resume-work 讀這份。
 
 ## 下一步
 
-1. （可選，使用者決定）照 `review-changes` 再審一輪這次的修正 commit（`git log -1 --format=%h -- HANDOFF.md` 那一個）：只看會讓 AI 做錯事的；公司專案只用 Claude Code 的 Sonnet。順便補改壞驗證（轉址、ECONNRESET、內網不送、讀輸入 3 秒、連不上不改寫 findings 各改壞一次，看測試會不會抓到）。程式 diff 約 230 行＋測試 85 行。建議 Opus、medium（判斷審閱問題、改要上線的程式）。
+1. 照 `review-changes` 再審一輪（使用者 2026-10-30 選了要審）這次的修正 commit（`git log -1 --format=%h -- HANDOFF.md` 那一個）：只看會讓 AI 做錯事的；公司專案只用 Claude Code 的 Sonnet。順便補改壞驗證（轉址、ECONNRESET、內網不送、讀輸入 3 秒、連不上不改寫 findings 各改壞一次，看測試會不會抓到）。程式 diff 約 230 行＋測試 85 行。建議 Opus、medium（判斷審閱問題、改要上線的程式）。
 2. 段 D2：3-5 Artifact Analysis（gcloud、假 gcloud、費用精算器；`D:\Dev\company\art-collector-recommender\docs\todo-plan.md` 第三階段）。動手前照 resume-work 量行數。建議 Opus、medium。
 3. 段 D3：`--handoff` 交接包與 AGENT_SETUP「交給資訊權責單位」一節（待辦「【交接包】」，含 3-1 結果轉成 findings 格式）。錯誤回報（D8）動手前先問使用者收件方式。建議 Opus、medium。
 
