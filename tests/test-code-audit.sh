@@ -401,24 +401,27 @@ if [ -s "$S/port" ] && [ -s "$S/port.https" ] && [ -s "$S/port.legacy" ]; then
   chk t10d4 "評分 B（8/10 項通過）"
   nochk t10d4 "undefined"
 
-  # 沒帶 --observatory：非互動沒回答、回 n → 不送；回 y → 送
+  # 沒帶 --observatory、不是終端機：不問、管線回答 y 也不算同意（答案依序分給各題，`yes |` 會誤當同意）
   obs obs-good; : > "$LOG"
   run --web-check --url "$H/web-good" < /dev/null; rc_is t10e $? 0
-  chk t10e "要把主機名稱 127.0.0.1 送給 MDN HTTP Observatory"
+  chk t10e "不是在終端機執行：細項 3-4 只認 --observatory"
+  nochk t10e "要把主機名稱 127.0.0.1 送給 MDN HTTP Observatory"
   chk t10e "沒有同意送出主機名稱，3-4 未執行"
   cnt_is t10e "$(nlog obs-good)" 0
   printf 'n\n' | run --web-check --url "$H/web-good"; rc_is t10e2 $? 0
   chk t10e2 "沒有同意送出主機名稱，3-4 未執行"
   cnt_is t10e2 "$(nlog obs-good)" 0
-  # 輸入一直不關（AI Agent 代跑時可能這樣）：等 3 秒就當沒回答，不能卡住
+  # 輸入一直不關（AI Agent 代跑時可能這樣）：3-2 問要不要打狀態檔的網址，等 3 秒就當沒回答，不能卡住
+  printf 'SAVED_PROJECT_ID="proj-a"\nSAVED_CLOUD_RUN_URL="%s/ok"\n' "$B" > "$ST"
   T0=$SECONDS
-  run --web-check --url "$H/web-good" < <(sleep 30); rc_is t10e4 $? 0
-  [ $((SECONDS - T0)) -lt 20 ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t10e4] 輸入不關時卡住了（$((SECONDS - T0)) 秒）"; }
-  chk t10e4 "沒有同意送出主機名稱，3-4 未執行"
-  cnt_is t10e4 "$(nlog obs-good)" 0
+  run --eval-only < <(sleep 30); rc_is t10e4 $? 0
+  EL=$((SECONDS - T0))
+  [ "$EL" -ge 2 ] && [ "$EL" -lt 10 ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t10e4] 輸入不關時應該等約 3 秒（實際 $EL 秒）"; }
+  chk t10e4 "沒有確認要打第一階段記下的網站"
+  rm -f "$ST"
   printf 'y\n' | run --web-check --url "$H/web-good"; rc_is t10e3 $? 0
-  chk t10e3 "評分 A+"
-  cnt_is t10e3 "$(nlog obs-good)" 1
+  chk t10e3 "沒有同意送出主機名稱，3-4 未執行"
+  cnt_is t10e3 "$(nlog obs-good)" 0
 
   # 平常的設定（沒有 LAZY_PACK_OBSERVATORY_ALLOW_LOCAL）遇到本機網址：不問、不送；http 網址不查 TLS。
   # Observatory 仍指到假的 obs-good，要是誤送會被記下來，也打不到真的 Observatory
@@ -448,6 +451,13 @@ if [ -s "$S/port" ] && [ -s "$S/port.https" ] && [ -s "$S/port.legacy" ]; then
   chk t10f5 "首頁是轉址（HTTP 302，轉址超過 3 次），只檢查到轉址的回應；http 有沒有轉到 https 判斷不了"
   chk t10f5 "不存在的網址回 HTTP 302（被轉走了）"
   nochk t10f5 "WEB-NO-HTTPS"
+  # 轉到別的主機：不跟過去、判斷不了、不報高
+  : > "$LOG"
+  run --web-check --url "$B/web-away" < /dev/null; rc_is t10f8 $? 0
+  chk t10f8 "轉到別的主機 localhost"
+  chk t10f8 "HTTPS／HSTS：✅ 判斷不了"
+  nochk t10f8 "WEB-NO-HTTPS"
+  cnt_is t10f8 "$(nlog web-good)" 0
   # 單頁應用：不存在的網址回 200，內文的「PHP 8.2」不算露出版本
   run --web-check --url "$H/web-spa" < /dev/null; rc_is t10f6 $? 1   # 沒有 HSTS（中）
   nochk t10f6 "WEB-ERROR-VERSION"
@@ -462,18 +472,25 @@ if [ -s "$S/port" ] && [ -s "$S/port.https" ] && [ -s "$S/port.legacy" ]; then
   run --web-check --url "$H/web-good" --mock < /dev/null; rc_is t10g $? 0
   chk t10g "細項 3-3、3-4 未執行：帶了 --mock"
   cnt_is t10g "$(wc -l < "$LOG" | tr -d ' ')" 0
+  printf '[{"id":"OLD-FINDING"}]\n' > "$FND"; cp "$FND" "$S/fnd.old"
   run --web-check < /dev/null; rc_is t10h $? 2
   chk t10h "web-check 要有網站網址"
   nochk t10h "PASS"
-  [ -f "$FND" ] && [ ! "$FND" -nt "$S/run.marker" ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t10h] 沒有網址時不該改寫 findings.json"; }
+  cmp -s "$FND" "$S/fnd.old" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t10h] 沒有網址時不該改寫 findings.json"; }
   printf 'SAVED_PROJECT_ID="proj-a"\nSAVED_CLOUD_RUN_URL="%s/web-good"\n' "$H" > "$ST"
   run --web-check < /dev/null; rc_is t10i $? 0
   chk t10i "檢查對象：$H/web-good（網址來源：第一階段記下的網址"
   rm -f "$ST"
-  run --web-check --url "http://127.0.0.1:1" < /dev/null; rc_is t10j $? 1
+  printf '[{"id":"OLD-FINDING"}]\n' > "$FND"; cp "$FND" "$S/fnd.old"; : > "$LOG"
+  run --web-check --url "http://127.0.0.1:1" --observatory < /dev/null; rc_is t10j $? 1
   chk t10j "3-3 網址預檢：❌ 連不上"
   chk t10j "reports/findings.json 不改寫"
-  [ -f "$FND" ] && [ ! "$FND" -nt "$S/run.marker" ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t10j] 連不上時不該改寫 findings.json"; }
+  chk t10j "網站連不上（見 3-3），不送出主機名稱，3-4 未執行"
+  cnt_is t10j "$(nlog obs-good)" 0
+  cmp -s "$FND" "$S/fnd.old" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t10j] 連不上時不該改寫 findings.json"; }
+  # --run-ai-eval 沒有網址：照舊跳過 3-3、3-4（不像 --web-check 結束碼 2）
+  run --run-ai-eval --target "$(mp "$FIX")" < /dev/null; rc_is t10j2 $? 0
+  chk t10j2 "細項 3-3、3-4 未執行：沒有網站網址"
   run --web-check --url; rc_is t10k $? 2
   chk t10k "--url 後面要接網址"
 
@@ -482,7 +499,7 @@ if [ -s "$S/port" ] && [ -s "$S/port.https" ] && [ -s "$S/port.legacy" ]; then
   nochk t10l "SECRETKEY"
   grep -q SECRETKEY "$FND" && { fail=$((fail+1)); echo "FAIL [t10l] findings.json 含查詢字串"; } || pass=$((pass+1))
   LATEST="$(latest_rep)"
-  if [ -n "$LATEST" ] && ! grep -q SECRETKEY "$LATEST" && ! grep -q SECRETKEY "$FULL"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL [t10l] 報告檔缺少或含查詢字串"; fi
+  if [ -n "$LATEST" ] && [ -f "$FULL" ] && ! grep -q SECRETKEY "$LATEST" && ! grep -q SECRETKEY "$FULL"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL [t10l] 報告檔缺少或含查詢字串"; fi
   run --run-ai-eval --target "$(mp "$FIX")" --url "$H/web-good" < /dev/null; rc_is t10m $? 1
   chk t10m "掃描目標"
   chk t10m "\[細項 3-2\]"

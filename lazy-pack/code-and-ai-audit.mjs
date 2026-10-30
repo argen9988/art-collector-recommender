@@ -23,8 +23,8 @@
  *
  * 細項 3-3／3-4（--web-check 或 --run-ai-eval 時跑；網址的取得順序同 3-2；--mock、--self-test 不連網）：
  *   3-3 用 node 內建的 fetch 與 tls 看 HSTS、Cookie 的 Secure／HttpOnly、CORS、TLS 1.0／1.1、錯誤頁有沒有露出版本
- *   3-4 只把主機名稱送給 MDN HTTP Observatory（不需金鑰；掃描紀錄任何人都查得到，所以要 --observatory 或回答 y 才送；
- *       不是終端機時最多等輸入 3 秒，等不到就不送；本機與內網的主機名稱一律不送）
+ *   3-4 只把主機名稱送給 MDN HTTP Observatory（不需金鑰；掃描紀錄任何人都查得到，所以要 --observatory 或在終端機回答 y 才送；
+ *       不是終端機時不問、管線的回答不算同意；本機與內網的主機名稱、連不上的網站一律不送）
  *   --web-check 沒有網址時結束碼 2；3-3 高、中風險與 3-4 評分 D、F 讓第三階段不通過，3-4 拿不到結果不擋
  *   結果寫進 reports/findings.json（每筆欄位照 vulnerability-scan-summary 規格第 8 節，版本見 FINDINGS_SCHEMA_VERSION；連不上網站時不改寫）
  *   測試時用環境變數 LAZY_PACK_OBSERVATORY_API 換掉 Observatory 的網址（指到假伺服器），LAZY_PACK_OBSERVATORY_ALLOW_LOCAL=1 讓本機網址也送（假伺服器在本機）
@@ -330,14 +330,16 @@ function resolveSiteUrl(cliArgs, state) {
 const isLocalHost = (u) => ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname);
 // 本機或內網（私有 IP、沒有點的主機名稱、.local 之類）：Observatory 從外面連不到，也不該把內部主機名稱送出去
 function isPrivateHost(u) {
-  const h = u.hostname.replace(/^\[|\]$/g, '').toLowerCase();
-  if (isLocalHost(u) || (!h.includes('.') && !net.isIP(h))) return true;
+  let h = u.hostname.replace(/^\[|\]$/g, '').toLowerCase().replace(/\.$/, ''); // 結尾的點（intranet.）也是同一台
+  const mapped = h.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/); // IPv4 對應位址（[::ffff:127.0.0.1] 會變成 ::ffff:7f00:1）
+  if (mapped) h = [parseInt(mapped[1], 16) >> 8, parseInt(mapped[1], 16) & 255, parseInt(mapped[2], 16) >> 8, parseInt(mapped[2], 16) & 255].join('.');
+  if (isLocalHost(u) || h === 'localhost' || (!h.includes('.') && !net.isIP(h))) return true;
   if (/\.(local|localhost|internal|intranet|lan|corp|home\.arpa)$/.test(h)) return true;
   if (net.isIPv4(h)) {
     const [a, b] = h.split('.').map(Number);
     return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
   }
-  if (net.isIPv6(h)) return h === '::1' || /^f[cd]/.test(h) || /^fe[89ab]/.test(h);
+  if (net.isIPv6(h)) return h === '::1' || h === '::' || /^f[cd]/.test(h) || /^fe[89ab]/.test(h);
   return false;
 }
 
@@ -667,7 +669,7 @@ async function runWebCheck(params, site) {
 // Observatory 評分對應風險等級：D、F 中（擋上線），C 低，其餘資訊
 const obsSeverity = (grade) => (/^[DF]/.test(grade) ? '中' : /^C/.test(grade) ? '低' : '資訊');
 
-async function runObservatory(params, site, consent) {
+async function runObservatory(params, site, consent, siteUnreachable) {
   const u = site.u;
   console.log('\n------------------------------------------------------------------------------');
   console.log('🔭 [細項 3-4] MDN HTTP Observatory（Mozilla 的免費網站安全評分）');
@@ -683,8 +685,12 @@ async function runObservatory(params, site, consent) {
     console.log('⏭️ 本機或內網網址：Observatory 從外面連不到，也不把內部主機名稱送出去，3-4 未執行');
     return { passed: true, status: '⏭️ 未執行（本機或內網網址）', findings: [] };
   }
+  if (siteUnreachable) {
+    console.log('⏭️ 網站連不上（見 3-3），不送出主機名稱，3-4 未執行');
+    return { passed: true, status: '⏭️ 未執行（網站連不上）', findings: [] };
+  }
   if (!consent) {
-    console.log('⏭️ 沒有同意送出主機名稱，3-4 未執行（要跑請加 --observatory 或回答 y）');
+    console.log('⏭️ 沒有同意送出主機名稱，3-4 未執行（要跑請加 --observatory，或在終端機回答 y）');
     return { passed: true, status: '⏭️ 未執行（沒有同意送出主機名稱）', findings: [] };
   }
   // 拿不到結果不擋上線（第三方服務），只在報告註明
@@ -728,7 +734,7 @@ async function runWebStage(params, site, skipWhy, obsConsent) {
     return { passed: true, status33: s, status34: s, findings: [], findingsFile: null };
   }
   const r3 = await runWebCheck(params, site);
-  const r4 = await runObservatory(params, site, obsConsent);
+  const r4 = await runObservatory(params, site, obsConsent, r3.unreachable);
   const findings = [...r3.findings, ...r4.findings];
   let findingsFile = null;
   if (r3.unreachable) {
@@ -1275,10 +1281,12 @@ if (runWeb) {
     console.log(`\n❌ --web-check 要有網站網址：${webSkipWhy.replace(/^沒有網站網址；/, '')}。`);
     process.exit(2);
   }
-  // 3-4 會把主機名稱交給 Mozilla、掃描紀錄公開：帶 --observatory 或回答 y 才送（非互動環境沒回答就不送）
+  // 3-4 會把主機名稱交給 Mozilla、掃描紀錄公開：帶 --observatory 或在終端機回答 y 才送。
+  // 管線的回答不算同意（答案依序分給各題，`yes |` 或只想答 3-2 的 y 會被當成同意），也不讀管線，留給 3-2
   if (webSite && !(isPrivateHost(webSite.u) && !OBSERVATORY_ALLOW_LOCAL)) {
+    if (!args.includes('--observatory') && !process.stdin.isTTY) console.log('\nℹ️ 不是在終端機執行：細項 3-4 只認 --observatory，管線的回答不算同意送出主機名稱');
     obsConsent = args.includes('--observatory')
-      || /^y(es)?$/i.test(await ask(`\n🔭 細項 3-4 要把主機名稱 ${webSite.u.hostname} 送給 MDN HTTP Observatory 掃描嗎？掃描紀錄任何人都查得到。(y/N，直接按 Enter 就跳過 3-4) `));
+      || (process.stdin.isTTY && /^y(es)?$/i.test(await ask(`\n🔭 細項 3-4 要把主機名稱 ${webSite.u.hostname} 送給 MDN HTTP Observatory 掃描嗎？掃描紀錄任何人都查得到。(y/N，直接按 Enter 就跳過 3-4) `)));
   }
 }
 
@@ -1345,10 +1353,17 @@ if (isSelfTest) {
   const obsOk = Object.entries({ F: '中', 'D+': '中', 'C-': '低', B: '資訊', 'A+': '資訊' }).every(([g, s]) => obsSeverity(g) === s);
   if (!obsOk) wantCats.push('3-4 評分對應風險等級');
   // 內網主機名稱不送 Observatory
-  const privOk = ['http://localhost', 'https://10.1.2.3', 'https://172.20.0.1', 'https://192.168.1.5', 'https://intranet', 'https://app.corp', 'https://[fd00::1]'].every((x) => isPrivateHost(new URL(x)))
-    && !['https://art-web-abc-de.a.run.app', 'https://8.8.8.8', 'https://172.32.0.1'].some((x) => isPrivateHost(new URL(x)));
+  const privOk = ['http://localhost', 'http://localhost.', 'https://intranet.', 'https://nas.lan.', 'https://10.1.2.3', 'https://172.20.0.1', 'https://192.168.1.5', 'https://100.64.0.1', 'https://169.254.1.1', 'https://intranet', 'https://app.corp', 'https://[fd00::1]', 'https://[fe80::1]', 'https://[::]', 'https://[::ffff:127.0.0.1]', 'https://[::ffff:10.0.0.1]'].every((x) => isPrivateHost(new URL(x)))
+    && !['https://art-web-abc-de.a.run.app', 'https://art-web-abc-de.a.run.app.', 'https://8.8.8.8', 'https://172.32.0.1', 'https://100.128.0.1', 'https://[2001:db8::1]', 'https://[::ffff:8.8.8.8]'].some((x) => isPrivateHost(new URL(x)));
   if (!privOk) wantCats.push('本機與內網主機名稱的判斷');
-  const webOk = wantCats.every((c) => badCats.has(c)) && goodFindings.length === 0 && fieldsOk && httpOk && quietOk && obsOk && privOk;
+  // 舊版 TLS 探測被中斷（ECONNRESET，防火牆也會這樣）算判斷不了，不算網站拒絕舊版：本機開一個一連上就送 RST 的埠
+  const rstSrv = net.createServer((s) => (s.resetAndDestroy ? s.resetAndDestroy() : s.destroy()));
+  const rstPort = await new Promise((r) => { rstSrv.listen(0, '127.0.0.1', () => r(rstSrv.address().port)); });
+  const rst = await probeLegacyTls(new URL(`https://127.0.0.1:${rstPort}`), 5);
+  rstSrv.close();
+  const resetOk = rst.accepted === undefined && String(rst.unknown || '').includes('ECONNRESET');
+  if (!resetOk) wantCats.push('舊版 TLS 探測被中斷要算判斷不了');
+  const webOk = wantCats.every((c) => badCats.has(c)) && goodFindings.length === 0 && fieldsOk && httpOk && quietOk && obsOk && privOk && resetOk;
   if (!webOk) console.error(`❌ 3-3 判斷有誤：該抓的 ${wantCats.filter((c) => !badCats.has(c)).join('、') || '都有'}；正確設定誤判 ${goodFindings.length} 筆；欄位${fieldsOk ? '齊全' : '不齊'}`);
   if (badAccVerdict.pass || badInjVerdict.pass || !leakOk || !cleanOk || !webOk) {
     console.error('❌ 自我測試失敗：負面測資未被攔截！');

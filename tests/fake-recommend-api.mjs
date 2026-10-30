@@ -21,6 +21,7 @@
  *     web-302   首頁轉到 https（驗 http 網址「會轉到 https」不算明碼）
  *     web-hop   首頁先轉到同主機的 /web-hop/login（http），那裡再轉到 https（驗同主機轉址跟著走）
  *     web-loop  任何路徑都轉到同主機的下一頁，永遠轉不完（驗轉址超過次數時「判斷不了」、不報高）
+ *     web-away  首頁轉到別的主機（localhost，同一個埠）（驗轉到別的主機時「判斷不了」、不跟過去）
  *     web-spa   單頁應用：不存在的網址也回 200 整頁，內文剛好有「PHP 8.2」（驗錯誤頁回 200 時不看內文）
  *   細項 3-4 假 MDN Observatory（POST <模式>/api/v2/scan?host=…）：
  *     obs-good 評分 A+ 全過；obs-bad 評分 D、5 項沒過；obs-err 回 422 掃不了；obs-key 回 401；
@@ -52,6 +53,10 @@ function webAnswer(mode, apiPath, req, res) {
   }
   if (mode === 'web-hop') {
     res.writeHead(302, { Location: '/web-hop/login' });
+    return res.end();
+  }
+  if (mode === 'web-away') {
+    res.writeHead(302, { Location: `http://localhost:${req.socket.localPort}/web-good` });
     return res.end();
   }
   if (mode === 'web-loop') {
