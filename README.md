@@ -58,11 +58,15 @@
 8. **【細項 2-5（🟢 非必要選配 2）】是否啟用「排程自動發送客製化 EDM」定時器（Cloud Scheduler）**：
    - 若目前由業務手動查詢或按鈕寄信，**預設建議跳過**；若需定時自動跑「以人推畫／以畫推人」發信再開啟（前 3 個排程免費 **NT$0**）。
 
-### 🔹 第三階段：上線前原始碼與 AI 總體檢（共 2 項）
+### 🔹 第三階段：上線前原始碼與 AI 總體檢（共 4 項）
 9. **【細項 3-1】本機原始碼金鑰外洩自動掃描（SAST）**：
    - AI 自動翻遍所有網站程式碼，確認 0 硬編碼金鑰、0 `NEXT_PUBLIC_` 機密外洩（只讀不改、**NT$0**）。
 10. **【細項 3-2】20 題 AI 推薦準確度與「防惡意套話（Prompt Injection）」紅隊壓力測試**：
     - 以 **100% 虛構假資料**自動考 20 題（10 題考推薦畫作不超預算、零幻覺、不把其他藏家放進 EDM `CC` 欄位；10 題考拒絕駭客套話指令），100% 通過才算合格。
+11. **【細項 3-3】網址預檢**：
+    - 連幾次網站首頁與錯誤頁，檢查 HSTS、Cookie 的 Secure／HttpOnly、CORS、TLS 1.0／1.1、錯誤頁有沒有露出版本；高、中風險算不通過，結果寫進 `reports/findings.json`（**NT$0**）。
+12. **【細項 3-4】MDN HTTP Observatory 安全評分**：
+    - 只把主機名稱送給 Mozilla 的免費服務評 A+～F（**NT$0**，不需金鑰）；掃描紀錄是公開的，所以送出前先問您。
 
 ---
 
@@ -117,15 +121,16 @@ bash lazy-pack/gcp-setup-and-check.sh --stage 2      # 只跑第二階段（系�
 bash lazy-pack/gcp-setup-and-check.sh --stage cost   # 只跑雲端服務開啟清單與每月費用精算表
 bash lazy-pack/gcp-setup-and-check.sh --item 3       # 只挑單一細項（例如第 3 項預算與配額問答）執行
 # --item 編號對照：1 Paid Tier 計費綁定、2 雙 Owner 共管、3 預算／API 上限／Gmail 白名單、4 Secret Manager 金鑰隔離、
-#                 5 Cloud SQL 網路防護、6 Cloud SQL 規格月租選單、7 Vertex AI 選配、8 排程 EDM 選配（第三階段沒有 --item，用下面的 --scan-only／--eval-only）
+#                 5 Cloud SQL 網路防護、6 Cloud SQL 規格月租選單、7 Vertex AI 選配、8 排程 EDM 選配（第三階段沒有 --item，用下面的 --scan-only／--eval-only／--web-check）
 bash lazy-pack/gcp-setup-and-check.sh --check-only   # 純唯讀體檢模式（只檢查與出報告，不修改設定）
 bash lazy-pack/gcp-setup-and-check.sh --project <Project ID>   # 直接指定 GCP 專案（不帶時會列出帳號下所有專案讓您選）
 
-# 於本機執行第三階段（原始碼金鑰掃描 ＋ 20 題 AI 推薦與防套話紅隊測試）：
+# 於本機執行第三階段（原始碼金鑰掃描 ＋ 20 題 AI 推薦與防套話紅隊測試 ＋ 有網址時的網址預檢與 Observatory 評分）：
 node lazy-pack/code-and-ai-audit.mjs --run-ai-eval                       # 不帶 --target：出「原始碼在哪裡」選單
 node lazy-pack/code-and-ai-audit.mjs --source github --repo "<GitHub 網址>" --run-ai-eval   # 跳過選單，直接指定來源（cloud／github／local）
 node lazy-pack/code-and-ai-audit.mjs --target "<藏家系統原始碼路徑>" --run-ai-eval         # 已知資料夾時
 node lazy-pack/code-and-ai-audit.mjs --eval-only --url "<Cloud Run 網址>"                  # 20 題直接打真實線上網站（只考題、不掃原始碼）
+node lazy-pack/code-and-ai-audit.mjs --web-check --url "<Cloud Run 網址>" --observatory    # 只跑 3-3 網址預檢＋3-4 Observatory（--observatory＝同意送出主機名稱）
 ```
 
 **補充說明：**

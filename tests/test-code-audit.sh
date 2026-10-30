@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# code-and-ai-audit.mjs 自動測試：--target 防呆與三種原始碼來源（假 gcloud、本機假 git repo、假 ZIP），不連雲端、不花錢
+# code-and-ai-audit.mjs 自動測試：--target 防呆、三種原始碼來源（假 gcloud、本機假 git repo、假 ZIP）、3-2 線上測試、3-3／3-4 網址檢查（假網站與假 Observatory），不連雲端、不花錢
 # 用法：bash tests/test-code-audit.sh（結果暫存寫到系統暫存資料夾，跑完還原 reports/ 狀態檔）
 T="$(cd -P "$(dirname "$0")" && pwd -P)"
 S="$(mktemp -d)"; [ -n "$S" ] && [ -d "$S" ] || exit 2
@@ -12,19 +12,23 @@ mkdir -p "$R/reports"
 [ -f "$ST" ] && { cp "$ST" "$S/state.bak" || exit 2; }
 FULL="$R/reports/full-execution-report.md"
 [ -f "$FULL" ] && { cp "$FULL" "$S/full.bak" || exit 2; }
+FND="$R/reports/findings.json"
+[ -f "$FND" ] && { cp "$FND" "$S/findings.bak" || exit 2; }
 touch "$S/start.marker"
 # 中途被中斷（Ctrl-C）也要還原使用者的狀態檔、關掉假伺服器、清暫存
 cleanup() {
   [ -n "${SRV:-}" ] && { kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; }
   if [ -f "$S/state.bak" ]; then cp "$S/state.bak" "$ST"; else rm -f "$ST"; fi
   if [ -f "$S/full.bak" ]; then cp "$S/full.bak" "$FULL"; else rm -f "$FULL"; fi
+  if [ -f "$S/findings.bak" ]; then cp "$S/findings.bak" "$FND"; else rm -f "$FND"; fi
   find "$R/reports" -maxdepth 1 -name 'stage-*-report-*.md' -newer "$S/start.marker" -delete 2>/dev/null
   rm -rf "${S:?}"
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 rm -f "$ST"   # 使用者狀態檔裡的真網址不能讓 3-2 測試打出去
-unset LAZY_PACK_API_TOKEN
+unset LAZY_PACK_API_TOKEN NODE_EXTRA_CA_CERTS
+export LAZY_PACK_OBSERVATORY_API="http://127.0.0.1:1/never"   # 3-4 永遠打不到真的 Observatory
 chmod +x "$S/fakebin/gcloud"
 export PATH="$S/fakebin:$PATH"
 # 給 node 與它叫起來的程式的路徑一律用 D:/… 寫法（Windows）；別的系統原樣
@@ -326,6 +330,115 @@ run --eval-only --url "http://art-web.example.invalid"; rc_is t9e $? 1
 chk t9e "這個網址不是 https"
 run --eval-only --api-path; rc_is t9f $? 2
 chk t9f "--api-path 後面要接路徑"
+
+# 10. 細項 3-3 網址預檢、3-4 MDN Observatory：假伺服器開 http＋兩個自簽 https（只收 TLS 1.2 以上、也收 1.0／1.1），
+#     假 Observatory 用 LAZY_PACK_OBSERVATORY_API 指過去（開頭已指到連不上的位址，任何一項都打不到真的 Observatory）
+fjs() { node -e "$1" "$(mp "$FND")"; }   # 用 node 讀 findings.json 判斷，印 ok 才算過
+if MSYS_NO_PATHCONV=1 openssl req -x509 -newkey rsa:2048 -nodes -keyout "$(mp "$S/k.pem")" -out "$(mp "$S/c.pem")" -days 1 -subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1" >/dev/null 2>&1; then
+  : > "$LOG"; rm -f "$S/port" "$S/port.https" "$S/port.legacy"
+  node "$(mp "$T/fake-recommend-api.mjs")" "$(mp "$S/port")" "$(mp "$LOG")" "$(mp "$S/c.pem")" "$(mp "$S/k.pem")" & SRV=$!
+  for _ in $(seq 1 50); do [ -s "$S/port" ] && break; sleep 0.2; done
+fi
+if [ -s "$S/port" ] && [ -s "$S/port.https" ] && [ -s "$S/port.legacy" ]; then
+  B="http://127.0.0.1:$(cat "$S/port")"; H="https://127.0.0.1:$(cat "$S/port.https")"; L="https://127.0.0.1:$(cat "$S/port.legacy")"
+  export NODE_EXTRA_CA_CERTS="$(mp "$S/c.pem")"   # 讓 node 的 fetch 信任這張自簽憑證
+  nlog() { grep -c "\"mode\":\"$1\"" "$LOG"; }
+  cnt_is() { if [ "$2" = "$3" ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL [$1] 送出 $2 次（預期 $3）"; fi; }
+  obs() { export LAZY_PACK_OBSERVATORY_API="$B/$1/api/v2/scan"; }
+
+  # 設定全對的 https 網站＋評分 A+ → 通過；只跑 3-3／3-4（不出原始碼選單、不跑 3-2）
+  obs obs-good; : > "$LOG"
+  run --web-check --url "$H/web-good" --observatory < /dev/null; rc_is t10 $? 0
+  chk t10 "HTTPS／HSTS：✅ 有 HSTS"
+  chk t10 "Cookie 旗標：✅ 沒問題（1 個 Cookie）"
+  chk t10 "CORS：✅ 沒有對任意來源放行"
+  chk t10 "舊版 TLS：✅ 不接受 TLS 1.0／1.1"
+  chk t10 "露出版本與堆疊：✅ 沒有"
+  chk t10 "評分 A+（105 分，10/10 項通過）"
+  chk t10 "3-3 網址預檢：通過"
+  nochk t10 "掃描目標"
+  nochk t10 "\[細項 3-2\]"
+  cnt_is t10 "$(nlog web-good)" 2          # 首頁＋錯誤頁各一次
+  cnt_is t10 "$(nlog obs-good)" 1
+  grep -q '"mode":"obs-good","method":"POST","path":"/api/v2/scan?host=127.0.0.1"' "$LOG" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t10] Observatory 沒收到 host=127.0.0.1"; }
+  grep -q '"origin":"https://lazy-pack-cors-check.example.invalid"' "$LOG" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t10] 沒送假來源 Origin"; }
+  [ "$(fjs 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).length===0?"ok":"no")')" = ok ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t10] findings.json 應該是空陣列"; }
+
+  # 設定全錯、也收舊版 TLS 的網站＋評分 D → 每一類都抓到，findings 欄位齊全，Cookie 只記名稱
+  obs obs-bad; : > "$LOG"
+  run --web-check --url "$L/web-bad" --observatory < /dev/null; rc_is t10b $? 1
+  for c in "\[中\] WEB-HSTS-MISSING" "\[中\] WEB-COOKIE-NO-SECURE（CWE-614）Cookie「sid」" "\[低\] WEB-COOKIE-NO-HTTPONLY（CWE-1004）Cookie「pref」" "\[高\] WEB-CORS-REFLECT" "\[低\] WEB-VERSION-HEADER（CWE-200）server 標頭露出軟體版本（Apache/2.4.1）" "\[中\] WEB-ERROR-STACK" "\[低\] WEB-ERROR-VERSION" "\[中\] WEB-TLS-LEGACY" "舊版 TLS：⚠️ 接受 TLSv1" "評分 D（25 分，5/10 項通過）" "3-3 網址預檢：未通過（高 1、中 4、低 4）"; do chk t10b "$c"; done
+  nochk t10b "Cookie「pref」沒有 Secure"
+  nochk t10b "x-powered-by 標頭露出"           # 只有名稱沒有版本的不算
+  nochk t10b "sid=fake"
+  [ "$(grep -c 'WEB-VERSION-HEADER' "$S/out.txt")" = 1 ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t10b] 首頁與錯誤頁一樣的 server 標頭應該只列一筆"; }
+  [ "$(fjs 'const f=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const keys=["category","cwe","target","severity","disposition","sources","description","schema_version"];const ok=f.length===10&&f.every(x=>keys.every(k=>k in x)&&x.schema_version===1&&Array.isArray(x.sources))&&f.filter(x=>x.severity==="高"||x.severity==="中").every(x=>x.disposition==="【必要修復】")&&f.some(x=>x.category==="OBS-GRADE"&&x.severity==="中"&&x.sources[0]==="MDN Observatory"&&x.cwe==="CWE-693")&&!JSON.stringify(f).includes("sid=fake");console.log(ok?"ok":"no "+f.length)')" = ok ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t10b] findings.json 筆數或欄位不對"; }
+  REP="$(latest_rep)"
+  if [ -n "$REP" ] && grep -q "## 二、 網址檢查發現的問題" "$REP" && grep -q "| 高 | 【必要修復】 | WEB-CORS-REFLECT | CWE-942 | Lazy Pack 預檢 |" "$REP" && grep -q "細項 3-3（網址預檢）\*\*：❌ 未通過" "$REP"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL [t10b] 單次報告少了 3-3 結果或問題表"; fi
+  grep -q "3-3 網址預檢：❌ 未通過.*3-4 Observatory：❌ 評分 D" "$FULL" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t10b] 累計總報告少了 3-3／3-4"; }
+
+  # Observatory 掃不了（422）、要金鑰（401）→ 註明沒有結果，不擋上線
+  obs obs-err
+  run --web-check --url "$H/web-good" --observatory < /dev/null; rc_is t10c $? 0
+  chk t10c "3-4 沒有結果：Observatory 掃不了這個網站（invalid-hostname-lookup）"
+  obs obs-key
+  run --web-check --url "$H/web-good" --observatory < /dev/null; rc_is t10d $? 0
+  chk t10d "Observatory 拒絕存取（HTTP 401）"
+
+  # 沒帶 --observatory：非互動沒回答、回 n → 不送；回 y → 送
+  obs obs-good; : > "$LOG"
+  run --web-check --url "$H/web-good" < /dev/null; rc_is t10e $? 0
+  chk t10e "要把主機名稱 127.0.0.1 送給 MDN HTTP Observatory"
+  chk t10e "沒有同意送出主機名稱，3-4 未執行"
+  printf 'n\n' | run --web-check --url "$H/web-good"; rc_is t10e2 $? 0
+  cnt_is t10e "$(nlog obs-good)" 0
+  printf 'y\n' | run --web-check --url "$H/web-good"; rc_is t10e3 $? 0
+  chk t10e3 "評分 A+"
+  cnt_is t10e3 "$(nlog obs-good)" 1
+
+  # 真的 Observatory（沒設 LAZY_PACK_OBSERVATORY_API）遇到本機網址：不問、不送；http 網址不查 TLS
+  : > "$LOG"
+  ( unset LAZY_PACK_OBSERVATORY_API; run --web-check --url "$B/web-good" --observatory < /dev/null ); rc_is t10f $? 0
+  chk t10f "本機網址，Observatory 從外面連不到"
+  chk t10f "舊版 TLS：⏭️ 不是 https，不適用"
+  chk t10f "HTTPS／HSTS：✅ 本機網址，不檢查"
+  nochk t10f "要把主機名稱"
+  cnt_is t10f "$(wc -l < "$LOG" | tr -d ' ')" 2
+  run --web-check --url "$B/web-302" < /dev/null; rc_is t10f2 $? 0
+  chk t10f2 "HTTPS／HSTS：✅ 會轉到 https"
+
+  # --mock 不連網；沒有網址 → 未執行且不動舊的 findings.json；網址從狀態檔來；連不上 → 未通過；缺值 → 結束碼 2
+  : > "$LOG"
+  run --web-check --url "$H/web-good" --mock < /dev/null; rc_is t10g $? 0
+  chk t10g "細項 3-3、3-4 未執行：帶了 --mock"
+  cnt_is t10g "$(wc -l < "$LOG" | tr -d ' ')" 0
+  run --web-check < /dev/null; rc_is t10h $? 0
+  chk t10h "細項 3-3、3-4 未執行：沒有網站網址"
+  [ -f "$FND" ] && [ ! "$FND" -nt "$S/run.marker" ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t10h] 沒有網址時不該改寫 findings.json"; }
+  printf 'SAVED_PROJECT_ID="proj-a"\nSAVED_CLOUD_RUN_URL="%s/web-good"\n' "$H" > "$ST"
+  run --web-check < /dev/null; rc_is t10i $? 0
+  chk t10i "檢查對象：$H/web-good（網址來源：第一階段記下的網址"
+  rm -f "$ST"
+  run --web-check --url "http://127.0.0.1:1" < /dev/null; rc_is t10j $? 1
+  chk t10j "3-3 網址預檢：❌ 連不上"
+  run --web-check --url; rc_is t10k $? 2
+  chk t10k "--url 後面要接網址"
+
+  # 網址的查詢字串不進畫面與 findings.json；--run-ai-eval 全跑時 3-3 也跑（3-2 打 web-good 沒有推薦端點，所以結束碼 1）
+  run --web-check --url "$H/web-good?key=SECRETKEY" --observatory < /dev/null; rc_is t10l $? 0
+  nochk t10l "SECRETKEY"
+  grep -q SECRETKEY "$FND" && { fail=$((fail+1)); echo "FAIL [t10l] findings.json 含查詢字串"; } || pass=$((pass+1))
+  run --run-ai-eval --target "$(mp "$FIX")" --url "$H/web-good" < /dev/null; rc_is t10m $? 1
+  chk t10m "掃描目標"
+  chk t10m "\[細項 3-2\]"
+  chk t10m "3-3 網址預檢：通過"
+  chk t10m "沒有同意送出主機名稱"
+  unset NODE_EXTRA_CA_CERTS
+else
+  skip=$((skip+1)); echo "SKIP [t10] 假網站（openssl 自簽憑證或假伺服器）起不來"
+fi
+kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; SRV=
+export LAZY_PACK_OBSERVATORY_API="http://127.0.0.1:1/never"
 
 echo "PASS=$pass FAIL=$fail SKIP=$skip"
 [ "$fail" -eq 0 ] && [ "$skip" -eq 0 ]
