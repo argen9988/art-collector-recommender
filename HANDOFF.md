@@ -17,12 +17,11 @@
 - 3-3 網址預檢、3-4 MDN Observatory、`--web-check`、`--observatory`、`reports/findings.json`（D10）
 - 假伺服器加假網站、假 Observatory、兩個自簽 https；測試第 10 段 74 項
 - AGENTS.md、README.md、AGENT_SETUP 的第三階段描述更新到 3-3、3-4
-- reflection 本機版 `D:\Dev\project-records\company\art-collector-recommender\reflections\2026-10-30_windows_feature-testing.md`；歷程、首頁本機版已更新
+- reflection 本機版 `D:\Dev\project-records\company\art-collector-recommender\reflections\2026-10-30_windows_feature-testing.md`；歷程、首頁本機版已更新；去識別化的 reflection 與歷程已寫進 second-brain（使用者看過）
 
 ## 還沒做完
 
 - 上面「下一步」第 1～3 項
-- 這次的 reflection 與歷程去識別化版還沒寫進 second-brain（給使用者看過才寫；本機歷程 `second_brain: pending`）
 - findings 欄位名稱與類別代號要請 vulnerability-scan-summary 寫進規格第 8 節（待辦「【交接包】」）
 - 弱掃那邊照規格做 Skill、懶人包、程式修改、資料清理與 git 歷史清理（在那個專案另開 session）
 - 429／5xx 退避、真實推薦端點的路徑與格式（todo-plan「【小補強】」「【待確認】」）
