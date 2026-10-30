@@ -64,9 +64,9 @@
 10. **【細項 3-2】20 題 AI 推薦準確度與「防惡意套話（Prompt Injection）」紅隊壓力測試**：
     - 以 **100% 虛構假資料**自動考 20 題（10 題考推薦畫作不超預算、零幻覺、不把其他藏家放進 EDM `CC` 欄位；10 題考拒絕駭客套話指令），100% 通過才算合格。
 11. **【細項 3-3】網址預檢**：
-    - 連幾次網站首頁與錯誤頁，檢查 HSTS、Cookie 的 Secure／HttpOnly、CORS、TLS 1.0／1.1、錯誤頁有沒有露出版本；高、中風險算不通過，結果寫進 `reports/findings.json`（**NT$0**）。
+    - 連幾次網站首頁與錯誤頁，檢查 HSTS、Cookie 的 Secure／HttpOnly、CORS、TLS 1.0／1.1、錯誤頁有沒有露出版本；高、中風險會讓第三階段不通過，結果寫進 `reports/findings.json`（連不上網站時不改寫）（**NT$0**）。
 12. **【細項 3-4】MDN HTTP Observatory 安全評分**：
-    - 只把主機名稱送給 Mozilla 的免費服務評 A+～F（**NT$0**，不需金鑰）；掃描紀錄是公開的，所以送出前先問您。
+    - 只把主機名稱送給 Mozilla 的免費服務評 A+～F（**NT$0**，不需金鑰）；掃描紀錄是公開的，所以送出前先問您，本機與內網的網址不送。評分 D、F 會讓第三階段不通過；沒同意、Observatory 拿不到結果時不擋。
 
 ---
 
@@ -130,7 +130,7 @@ node lazy-pack/code-and-ai-audit.mjs --run-ai-eval                       # 不�
 node lazy-pack/code-and-ai-audit.mjs --source github --repo "<GitHub 網址>" --run-ai-eval   # 跳過選單，直接指定來源（cloud／github／local）
 node lazy-pack/code-and-ai-audit.mjs --target "<藏家系統原始碼路徑>" --run-ai-eval         # 已知資料夾時
 node lazy-pack/code-and-ai-audit.mjs --eval-only --url "<Cloud Run 網址>"                  # 20 題直接打真實線上網站（只考題、不掃原始碼）
-node lazy-pack/code-and-ai-audit.mjs --web-check --url "<Cloud Run 網址>" --observatory    # 只跑 3-3 網址預檢＋3-4 Observatory（--observatory＝同意送出主機名稱）
+node lazy-pack/code-and-ai-audit.mjs --web-check --url "<Cloud Run 網址>"    # 只跑 3-3 網址預檢＋3-4 Observatory（送出主機名稱前會先問；使用者已同意送出才加 --observatory）
 ```
 
 **補充說明：**

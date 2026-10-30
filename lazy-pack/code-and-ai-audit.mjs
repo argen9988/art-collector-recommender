@@ -15,7 +15,7 @@
  *   node lazy-pack/code-and-ai-audit.mjs --self-test                                      # 掃描 tests/fixtures 的乾淨假專案
  *   node lazy-pack/code-and-ai-audit.mjs                                                  # 沒帶 --target：出「原始碼從哪裡來」選單
  *   node lazy-pack/code-and-ai-audit.mjs --target "<藏家系統原始碼目錄>"                  # 僅跑細項 3-1 原始碼掃描
- *   node lazy-pack/code-and-ai-audit.mjs --target "<藏家系統原始碼目錄>" --run-ai-eval     # 細項 3-1 + 3-2 全跑
+ *   node lazy-pack/code-and-ai-audit.mjs --target "<藏家系統原始碼目錄>" --run-ai-eval     # 全跑：3-1 + 3-2，有網址時再加 3-3、3-4
  *   node lazy-pack/code-and-ai-audit.mjs --eval-only                                      # 僅跑細項 3-2 AI 20 題測試（不需原始碼）
  *   node lazy-pack/code-and-ai-audit.mjs --source cloud|github|local [--repo "<GitHub 網址>"]  # 不出選單，直接指定來源
  *   node lazy-pack/code-and-ai-audit.mjs --eval-only --url "<Cloud Run 網址>" [--api-path /api/recommend]  # 20 題打真實線上網站
@@ -23,9 +23,11 @@
  *
  * 細項 3-3／3-4（--web-check 或 --run-ai-eval 時跑；網址的取得順序同 3-2；--mock、--self-test 不連網）：
  *   3-3 用 node 內建的 fetch 與 tls 看 HSTS、Cookie 的 Secure／HttpOnly、CORS、TLS 1.0／1.1、錯誤頁有沒有露出版本
- *   3-4 只把主機名稱送給 MDN HTTP Observatory（不需金鑰；掃描紀錄任何人都查得到，所以要 --observatory 或回答 y 才送）
- *   結果寫進 reports/findings.json（每筆欄位照 vulnerability-scan-summary 規格第 8 節，版本見 FINDINGS_SCHEMA_VERSION）
- *   測試時用環境變數 LAZY_PACK_OBSERVATORY_API 換掉 Observatory 的網址（指到假伺服器）
+ *   3-4 只把主機名稱送給 MDN HTTP Observatory（不需金鑰；掃描紀錄任何人都查得到，所以要 --observatory 或回答 y 才送；
+ *       不是終端機時最多等輸入 3 秒，等不到就不送；本機與內網的主機名稱一律不送）
+ *   --web-check 沒有網址時結束碼 2；3-3 高、中風險與 3-4 評分 D、F 讓第三階段不通過，3-4 拿不到結果不擋
+ *   結果寫進 reports/findings.json（每筆欄位照 vulnerability-scan-summary 規格第 8 節，版本見 FINDINGS_SCHEMA_VERSION；連不上網站時不改寫）
+ *   測試時用環境變數 LAZY_PACK_OBSERVATORY_API 換掉 Observatory 的網址（指到假伺服器），LAZY_PACK_OBSERVATORY_ALLOW_LOCAL=1 讓本機網址也送（假伺服器在本機）
  *
  * 細項 3-2 的測試對象（--self-test 一律本機模擬）：
  *   --url 帶的網址 → 沒帶就用第一階段記下的 SAVED_CLOUD_RUN_URL → 都沒有（或帶 --mock）就用本機模擬回應
@@ -326,6 +328,18 @@ function resolveSiteUrl(cliArgs, state) {
 }
 
 const isLocalHost = (u) => ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname);
+// 本機或內網（私有 IP、沒有點的主機名稱、.local 之類）：Observatory 從外面連不到，也不該把內部主機名稱送出去
+function isPrivateHost(u) {
+  const h = u.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (isLocalHost(u) || (!h.includes('.') && !net.isIP(h))) return true;
+  if (/\.(local|localhost|internal|intranet|lan|corp|home\.arpa)$/.test(h)) return true;
+  if (net.isIPv4(h)) {
+    const [a, b] = h.split('.').map(Number);
+    return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+  }
+  if (net.isIPv6(h)) return h === '::1' || /^f[cd]/.test(h) || /^fe[89ab]/.test(h);
+  return false;
+}
 
 // 決定 3-2 打誰：--url → 狀態檔 SAVED_CLOUD_RUN_URL → 本機模擬；回傳 { ok, mode, url, endpoint, from, warn, msg }
 function resolveEvalEndpoint(cliArgs, state) {
@@ -466,6 +480,7 @@ const DISPOSITION = { 高: '【必要修復】', 中: '【必要修復】', 低:
 const SRC_PRECHECK = 'Lazy Pack 預檢';
 const SRC_OBSERVATORY = 'MDN Observatory';
 const OBSERVATORY_API = process.env.LAZY_PACK_OBSERVATORY_API || 'https://observatory-api.mdn.mozilla.net/api/v2/scan';
+const OBSERVATORY_ALLOW_LOCAL = process.env.LAZY_PACK_OBSERVATORY_ALLOW_LOCAL === '1'; // 只給測試用：假 Observatory 在本機
 const CORS_PROBE_ORIGIN = 'https://lazy-pack-cors-check.example.invalid';
 const HSTS_MIN_AGE_SEC = 15552000; // 180 天
 // 各項和 ZAP 規則的對應還沒拿真實 ZAP 報告實測，先不寫死（規格第 8 節第 5 點）
@@ -475,7 +490,7 @@ function makeFinding(category, cwe, target, severity, source, description) {
 }
 
 // 看一次回應：kind = 'page'（首頁）或 'error'（故意打不存在的路徑拿到的錯誤頁）
-// resp = { headers: { 小寫標頭名: 值 }, setCookies: [], body, isHttps, local, redirectsToHttps }
+// resp = { status, headers: { 小寫標頭名: 值 }, setCookies: [], body, isHttps, local, redirectsToHttps, redirectUnclear }
 function analyzeResponse(target, kind, resp) {
   const out = [];
   const h = (name) => String(resp.headers[name] || '');
@@ -485,12 +500,13 @@ function analyzeResponse(target, kind, resp) {
       const m = hsts.match(/max-age\s*=\s*"?(\d+)/i);
       if (!hsts) out.push(makeFinding('WEB-HSTS-MISSING', 'CWE-319', target, '中', SRC_PRECHECK, '沒有 Strict-Transport-Security（HSTS）標頭：瀏覽器不會強制只用 https，第一次連線可能被降級成明碼。'));
       else if (!m || Number(m[1]) < HSTS_MIN_AGE_SEC) out.push(makeFinding('WEB-HSTS-SHORT', 'CWE-319', target, '低', SRC_PRECHECK, `HSTS 的 max-age 太短（${m ? m[1] : '沒寫'} 秒，建議至少 ${HSTS_MIN_AGE_SEC} 秒＝180 天）。`));
-    } else if (!resp.local && !resp.redirectsToHttps) {
+    } else if (!resp.local && !resp.redirectsToHttps && !resp.redirectUnclear) {
       out.push(makeFinding('WEB-NO-HTTPS', 'CWE-319', target, '高', SRC_PRECHECK, '網站用 http 明碼連線、也沒有轉到 https：登入資訊與藏家資料在網路上看得到。'));
     }
     for (const c of resp.setCookies) {
       const name = c.split(';')[0].split('=')[0].trim() || '（沒有名稱）'; // 只記名稱，不記值
-      if (!/;\s*secure\s*(;|$)/i.test(c)) out.push(makeFinding('WEB-COOKIE-NO-SECURE', 'CWE-614', target, '中', SRC_PRECHECK, `Cookie「${name}」沒有 Secure 旗標：可能經由 http 明碼送出。`));
+      // 本機的 http 網址（開發中）本來就送不了 Secure 的 Cookie，不報
+      if (!/;\s*secure\s*(;|$)/i.test(c) && (resp.isHttps || !resp.local)) out.push(makeFinding('WEB-COOKIE-NO-SECURE', 'CWE-614', target, '中', SRC_PRECHECK, `Cookie「${name}」沒有 Secure 旗標：可能經由 http 明碼送出。`));
       if (!/;\s*httponly\s*(;|$)/i.test(c)) out.push(makeFinding('WEB-COOKIE-NO-HTTPONLY', 'CWE-1004', target, '低', SRC_PRECHECK, `Cookie「${name}」沒有 HttpOnly 旗標：網頁上的程式（含被注入的惡意程式）讀得到它。`));
     }
     const acao = h('access-control-allow-origin').trim();
@@ -505,7 +521,8 @@ function analyzeResponse(target, kind, resp) {
     const v = h(name);
     if (/\d+\.\d+/.test(v)) out.push(makeFinding('WEB-VERSION-HEADER', 'CWE-200', target, '低', SRC_PRECHECK, `${name} 標頭露出軟體版本（${v.slice(0, 60)}）：攻擊者可以直接查這個版本的已知漏洞。`));
   }
-  if (kind === 'error') {
+  // 錯誤頁的內容只在真的回 4xx／5xx 時看（單頁應用對不存在的網址回 200 整頁，內文可能剛好有「PHP 8.2」這種字）
+  if (kind === 'error' && !(resp.status < 400)) {
     const body = String(resp.body || '');
     if (/\bat \S+ \([^)\n]*:\d+:\d+\)|Traceback \(most recent call last\)/.test(body)) {
       out.push(makeFinding('WEB-ERROR-STACK', 'CWE-209', target, '中', SRC_PRECHECK, '錯誤頁露出程式堆疊（stack trace）：會洩漏程式結構與檔案位置。'));
@@ -535,7 +552,8 @@ function probeLegacyTls(u, timeoutSec) {
     sock.setTimeout(timeoutSec * 1000, () => finish({ unknown: `等了 ${timeoutSec} 秒沒有回應` }));
     sock.on('error', (err) => {
       const code = String(err.code || '');
-      if (/PROTOCOL_VERSION|UNSUPPORTED_PROTOCOL|WRONG_VERSION_NUMBER|HANDSHAKE_FAILURE|NO_SHARED_CIPHER|ECONNRESET/.test(code)) finish({ accepted: false });
+      if (/PROTOCOL_VERSION|UNSUPPORTED_PROTOCOL|WRONG_VERSION_NUMBER|HANDSHAKE_FAILURE|NO_SHARED_CIPHER/.test(code)) finish({ accepted: false });
+      else if (code === 'ECONNRESET') finish({ unknown: '連線被中斷（ECONNRESET），可能是防火牆擋下，不一定是網站不收舊版' });
       else finish({ unknown: code || err.message }); // 例如這台電腦本身送不出舊版握手
     });
   });
@@ -555,7 +573,7 @@ async function runWebCheck(params, site) {
   console.log('   • 🎯 這是做什麼：像一般訪客一樣連幾次網站首頁與一個不存在的網址，看網站回的「安全設定」。');
   console.log('   • ⚠️ 為什麼要做：少了這些設定，登入憑證可能被竊聽、被別的網站冒用，或讓攻擊者知道用了哪個版本的軟體。');
   console.log('   • ✨ 好處：上線前先抓出常見的設定缺漏，結果照弱掃專案的格式寫進 reports/findings.json，之後可以和自架平台的結果合併。');
-  console.log('   • 💰 費用與安全性：只送 3～4 次一般的連線，不登入、不送任何資料，NT$0。');
+  console.log('   • 💰 費用與安全性：約 2～3 次一般的連線（首頁、一個不存在的網址、https 時再試一次舊版 TLS 握手；首頁轉址時多跟幾次），只帶一個測試用的 Origin 標頭，不登入，NT$0。');
   console.log(`   • 🌐 檢查對象：${shown}（網址來源：${site.from}）`);
   console.log('   • 🔁 可重跑：只讀網站回應，不改任何設定，隨時可以再跑一次。');
   console.log('------------------------------------------------------------------------------');
@@ -566,25 +584,46 @@ async function runWebCheck(params, site) {
     const headers = {};
     res.headers.forEach((v, k) => { headers[k] = v; });
     const body = (await res.text()).slice(0, 200000);
-    const loc = res.headers.get('location') || '';
-    return { status: res.status, headers, setCookies: res.headers.getSetCookie ? res.headers.getSetCookie() : [], body, isHttps, local: isLocalHost(u), redirectsToHttps: !isHttps && /^https:\/\//i.test(loc) };
+    return { status: res.status, headers, setCookies: res.headers.getSetCookie ? res.headers.getSetCookie() : [], body, isHttps, local: isLocalHost(u), location: res.headers.get('location') || '' };
   };
   const findings = [];
   const notes = [];
+  const isRedirect = (r) => r.status >= 300 && r.status < 400 && r.location;
+  // 首頁：同一個主機、同一種協定的轉址跟著走（最多 3 次，例如先轉到 /login）；http 轉到 https 就停，算「會轉到 https」
+  const MAX_HOPS = 3;
+  const getPage = async () => {
+    let cur = new URL(base || u.origin);
+    const cookies = [];
+    for (let hop = 0; ; hop++) {
+      const r = await get(cur.href);
+      cookies.push(...r.setCookies);
+      if (!isRedirect(r)) return { ...r, setCookies: cookies };
+      let next = null;
+      try { next = new URL(r.location, cur); } catch { /* 看不懂的轉址 */ }
+      if (!isHttps && next && next.protocol === 'https:') return { ...r, setCookies: cookies, redirectsToHttps: true };
+      if (!next || next.hostname !== u.hostname || next.protocol !== cur.protocol || hop >= MAX_HOPS) {
+        const why = !next ? '轉址的網址看不懂' : next.hostname !== u.hostname ? `轉到別的主機 ${next.hostname}` : `轉址超過 ${MAX_HOPS} 次`;
+        notes.push(`首頁是轉址（HTTP ${r.status}，${why}），只檢查到轉址的回應${isHttps ? '' : '；http 有沒有轉到 https 判斷不了'}`);
+        return { ...r, setCookies: cookies, redirectUnclear: true };
+      }
+      cur = next;
+    }
+  };
   let page;
   try {
-    page = await get(base || u.origin);
+    page = await getPage();
   } catch (err) {
     const timedOut = err && (err.name === 'TimeoutError' || err.name === 'AbortError');
     const why = timedOut ? `等了 ${params.eval_request_timeout_sec} 秒沒有回應` : (err.cause && err.cause.code) || err.message;
     console.log(`❌ 連不上 ${shown}（${why}），3-3 沒有結果`);
-    return { passed: false, status: `❌ 連不上（${why}）`, findings: [] };
+    return { passed: false, status: `❌ 連不上（${why}）`, findings: [], unreachable: true };
   }
   findings.push(...analyzeResponse(shown, 'page', page));
   if (page.status === 401 || page.status === 403) notes.push(`首頁回 HTTP ${page.status}（要登入），只檢查得到登入前的回應`);
   try {
     const errPage = await get(`${base}/lazy-pack-404-check-${Date.now().toString(36)}`);
     findings.push(...analyzeResponse(shown, 'error', errPage));
+    if (errPage.status < 400) notes.push(`不存在的網址回 HTTP ${errPage.status}（${isRedirect(errPage) ? '被轉走了' : '可能是單頁應用'}），錯誤頁有沒有露出堆疊與版本沒檢查`);
   } catch (err) {
     notes.push(`錯誤頁沒拿到（${(err.cause && err.cause.code) || err.message}），這一項沒檢查`);
   }
@@ -608,7 +647,7 @@ async function runWebCheck(params, site) {
 
   const has = (prefix) => uniq.filter((f) => f.category.startsWith(prefix)).length;
   const line = (n, okText) => (n ? `⚠️ ${n} 項` : `✅ ${okText}`);
-  console.log(`   • HTTPS／HSTS：${line(has('WEB-HSTS') + has('WEB-NO-HTTPS'), isHttps ? '有 HSTS' : page.redirectsToHttps ? '會轉到 https' : '本機網址，不檢查')}`);
+  console.log(`   • HTTPS／HSTS：${line(has('WEB-HSTS') + has('WEB-NO-HTTPS'), isHttps ? '有 HSTS' : page.redirectsToHttps ? '會轉到 https' : page.redirectUnclear ? '判斷不了（見下方說明）' : '本機網址，不檢查')}`);
   console.log(`   • Cookie 旗標：${line(has('WEB-COOKIE'), `沒問題（${page.setCookies.length} 個 Cookie）`)}`);
   console.log(`   • CORS：${line(has('WEB-CORS'), '沒有對任意來源放行')}`);
   console.log(`   • 舊版 TLS：${tlsLine}`);
@@ -625,9 +664,11 @@ async function runWebCheck(params, site) {
   return { passed, status, findings: uniq };
 }
 
+// Observatory 評分對應風險等級：D、F 中（擋上線），C 低，其餘資訊
+const obsSeverity = (grade) => (/^[DF]/.test(grade) ? '中' : /^C/.test(grade) ? '低' : '資訊');
+
 async function runObservatory(params, site, consent) {
   const u = site.u;
-  const usingRealApi = !process.env.LAZY_PACK_OBSERVATORY_API;
   console.log('\n------------------------------------------------------------------------------');
   console.log('🔭 [細項 3-4] MDN HTTP Observatory（Mozilla 的免費網站安全評分）');
   console.log('   📖 【白話說明卡】：');
@@ -638,9 +679,9 @@ async function runObservatory(params, site, consent) {
   console.log('   • 💰 費用：NT$0。同一個網站 1 分鐘內重掃會拿到上一次的結果。');
   console.log('   • ⏭️ 可略過：不同意送出就跳過 3-4，其他細項照跑；Observatory 掃不了時只在報告註明，不擋上線。');
   console.log('------------------------------------------------------------------------------');
-  if (usingRealApi && isLocalHost(u)) {
-    console.log('⏭️ 本機網址，Observatory 從外面連不到，3-4 未執行');
-    return { passed: true, status: '⏭️ 未執行（本機網址）', findings: [] };
+  if (!OBSERVATORY_ALLOW_LOCAL && isPrivateHost(u)) {
+    console.log('⏭️ 本機或內網網址：Observatory 從外面連不到，也不把內部主機名稱送出去，3-4 未執行');
+    return { passed: true, status: '⏭️ 未執行（本機或內網網址）', findings: [] };
   }
   if (!consent) {
     console.log('⏭️ 沒有同意送出主機名稱，3-4 未執行（要跑請加 --observatory 或回答 y）');
@@ -669,17 +710,17 @@ async function runObservatory(params, site, consent) {
   const failed = Number(data.tests_failed) || 0;
   const total = Number(data.tests_quantity) || failed + (Number(data.tests_passed) || 0);
   const details = typeof data.details_url === 'string' && /^https:\/\//.test(data.details_url) ? data.details_url : '';
-  const severity = /^[DF]/.test(grade) ? '中' : /^C/.test(grade) ? '低' : '資訊';
+  const score = typeof data.score === 'number' && Number.isFinite(data.score) ? `${data.score} 分` : ''; // 沒給分數就不寫
   const findings = failed > 0
-    ? [makeFinding('OBS-GRADE', 'CWE-693', `https://${u.hostname}`, severity, SRC_OBSERVATORY, `MDN Observatory 評分 ${grade}（${data.score} 分），${failed}/${total} 項沒過${details ? `；逐項說明見 ${details}` : ''}。`)]
+    ? [makeFinding('OBS-GRADE', 'CWE-693', `https://${u.hostname}`, obsSeverity(grade), SRC_OBSERVATORY, `MDN Observatory 評分 ${grade}${score ? `（${score}）` : ''}，${failed}/${total} 項沒過${details ? `；逐項說明見 ${details}` : ''}。`)]
     : [];
   const passed = !blocking(findings);
-  const status = `${passed ? '✅' : '❌'} 評分 ${grade}（${data.score} 分，${total - failed}/${total} 項通過）`;
+  const status = `${passed ? '✅' : '❌'} 評分 ${grade}（${score ? `${score}，` : ''}${total - failed}/${total} 項通過）`;
   console.log(`${status}${details ? `\n   • 逐項說明：${details}` : ''}`);
   return { passed, status, findings };
 }
 
-// 3-3＋3-4 一起跑，結果寫進 reports/findings.json；沒有網址時不動舊的 findings.json
+// 3-3＋3-4 一起跑，結果寫進 reports/findings.json；沒有網址、連不上網站時不動舊的 findings.json
 async function runWebStage(params, site, skipWhy, obsConsent) {
   if (!site) {
     const s = `⏭️ 未執行（${skipWhy}）`;
@@ -689,9 +730,20 @@ async function runWebStage(params, site, skipWhy, obsConsent) {
   const r3 = await runWebCheck(params, site);
   const r4 = await runObservatory(params, site, obsConsent);
   const findings = [...r3.findings, ...r4.findings];
-  fs.mkdirSync(REPORTS_DIR, { recursive: true });
-  fs.writeFileSync(FINDINGS_FILE, JSON.stringify(findings, null, 2) + '\n', 'utf-8');
-  return { passed: r3.passed && r4.passed, status33: r3.status, status34: r4.status, findings, findingsFile: FINDINGS_FILE };
+  let findingsFile = null;
+  if (r3.unreachable) {
+    // 空的 findings.json 會被當成「沒有弱點」，連不上時保留舊檔
+    console.log('⚠️ 連不上網站，reports/findings.json 不改寫（這次沒有檢查結果，不代表沒有弱點）');
+  } else {
+    try {
+      fs.mkdirSync(REPORTS_DIR, { recursive: true });
+      fs.writeFileSync(FINDINGS_FILE, JSON.stringify(findings, null, 2) + '\n', 'utf-8');
+      findingsFile = FINDINGS_FILE;
+    } catch (err) {
+      console.log(`⚠️ 寫不進 ${FINDINGS_FILE}（${err.code || err.message}），結果只留在畫面與報告裡`);
+    }
+  }
+  return { passed: r3.passed && r4.passed, status33: r3.status, status34: r4.status, findings, findingsFile };
 }
 
 // -----------------------------------------------------------------------------
@@ -809,7 +861,7 @@ function writeReports(params, runScan, runEval, codeResult, aiResult, targetDir,
     `| 細項 3-4 | MDN HTTP Observatory 安全標頭評分 | ${web ? web.status34 : '⏭️ 本次未選跑'} |`,
     '',
     ...(web && web.findings.length ? [
-      '## 二、 網址檢查發現的問題（風險等級高、中＝必要修復）',
+      '## 二、 網址檢查發現的問題（高、中＝必要修復，會讓第三階段不通過；低＝建議修復；資訊＝參考）',
       '',
       '| 風險等級 | 處置原則 | 弱點類別 | CWE | 檢測來源 | 說明 |',
       '| :---: | :--- | :--- | :--- | :--- | :--- |',
@@ -865,6 +917,26 @@ function writeReports(params, runScan, runEval, codeResult, aiResult, targetDir,
 // 5. 原始碼來源定位與 --target 防呆（沒帶 --target 時不再掃 Lazy Pack 自己）
 // -----------------------------------------------------------------------------
 let pipedAnswers = null;
+const STDIN_WAIT_MS = 3000;
+function readPipedStdin(waitMs) {
+  return new Promise((resolve) => {
+    let buf = '';
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      process.stdin.removeAllListeners('data');
+      process.stdin.destroy(); // 不關掉的話，輸入一直開著時 node 不會結束
+      resolve(buf);
+    };
+    const timer = setTimeout(finish, waitMs);
+    process.stdin.setEncoding('utf-8');
+    process.stdin.on('data', (c) => { buf += c; });
+    process.stdin.once('end', finish);
+    process.stdin.once('error', finish);
+  });
+}
 async function ask(question) {
   if (process.stdin.isTTY) {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -872,10 +944,9 @@ async function ask(question) {
     rl.close();
     return answer.trim();
   }
-  // 輸入不是終端機（管線、AI Agent 代跑）：一次讀完，每題取一行；讀完了就當空白
-  if (pipedAnswers === null) {
-    try { pipedAnswers = fs.readFileSync(0, 'utf-8').split(/\r?\n/); } catch { pipedAnswers = []; }
-  }
+  // 輸入不是終端機（管線、AI Agent 代跑）：一次讀完，每題取一行；讀完了就當空白。
+  // 最多等 STDIN_WAIT_MS：AI Agent 給的輸入可能一直不關，不能卡在這裡（等不到就當沒回答＝不同意）
+  if (pipedAnswers === null) pipedAnswers = (await readPipedStdin(STDIN_WAIT_MS)).split(/\r?\n/);
   const answer = (pipedAnswers.shift() ?? '').trim();
   console.log(`${question}${answer}`);
   return answer;
@@ -1112,7 +1183,7 @@ async function resolveTarget(cliArgs) {
 // -----------------------------------------------------------------------------
 const args = process.argv.slice(2);
 {
-  // 不認得的選項、--target／--source／--repo 缺值：直接結束碼 2（--url／--api-path 缺值由 3-2 自己判斷，帶 --mock 時可略過）
+  // 不認得的選項、--target／--source／--repo 缺值：直接結束碼 2（--url 缺值由 3-2 與 3-3／3-4 自己判斷，--api-path 缺值由 3-2 判斷，帶 --mock 時可略過；--api-path 只給 3-2 用）
   const FLAGS = new Set(['--self-test', '--scan-only', '--eval-only', '--run-ai-eval', '--web-check', '--observatory', '--mock', '--target', '--source', '--repo', '--url', '--api-path']);
   const NEED_VALUE = ['--target', '--source', '--repo'];
   const bad = args.find((a) => a.startsWith('--') && !FLAGS.has(a));
@@ -1137,6 +1208,9 @@ const webCheck = args.includes('--web-check');
 const runScan = !evalOnly && (!webCheck || fullRun || ['--target', '--source', '--repo'].some((f) => args.includes(f)));
 const runAiEval = evalOnly || fullRun || isSelfTest;
 const runWeb = (webCheck || fullRun) && !isSelfTest;
+const NO_SOURCE_FLAGS = !['--target', '--source', '--repo'].some((f) => args.includes(f));
+if (scanOnly && webCheck && !fullRun && NO_SOURCE_FLAGS) console.log('ℹ️ --scan-only 搭配 --web-check 但沒指定原始碼，這次 3-1 不跑；要掃原始碼請加 --target "<原始碼資料夾>"');
+if (args.includes('--observatory') && !runWeb) console.log('ℹ️ --observatory 要搭配 --web-check 或 --run-ai-eval 才會跑 3-4，這次沒有作用');
 
 const params = loadParams();
 console.log('==============================================================================');
@@ -1196,8 +1270,13 @@ if (runWeb) {
     if (s.u) webSite = s;
     else webSkipWhy = '沒有網站網址；加 --url "<Cloud Run 網址>"，或先跑第一階段記下網址';
   }
+  // 明說要檢查網址（--web-check）卻沒有網址：不印 PASS，結束碼 2
+  if (webCheck && !fullRun && !webSite && !args.includes('--mock')) {
+    console.log(`\n❌ --web-check 要有網站網址：${webSkipWhy.replace(/^沒有網站網址；/, '')}。`);
+    process.exit(2);
+  }
   // 3-4 會把主機名稱交給 Mozilla、掃描紀錄公開：帶 --observatory 或回答 y 才送（非互動環境沒回答就不送）
-  if (webSite && !(isLocalHost(webSite.u) && !process.env.LAZY_PACK_OBSERVATORY_API)) {
+  if (webSite && !(isPrivateHost(webSite.u) && !OBSERVATORY_ALLOW_LOCAL)) {
     obsConsent = args.includes('--observatory')
       || /^y(es)?$/i.test(await ask(`\n🔭 細項 3-4 要把主機名稱 ${webSite.u.hostname} 送給 MDN HTTP Observatory 掃描嗎？掃描紀錄任何人都查得到。(y/N，直接按 Enter 就跳過 3-4) `));
   }
@@ -1248,13 +1327,34 @@ if (isSelfTest) {
     && analyzeResponse('http://x.example', 'page', { ...plain, redirectsToHttps: true }).length === 0
     && analyzeResponse('http://127.0.0.1', 'page', { ...plain, local: true }).length === 0;
   if (!httpOk) wantCats.push('WEB-NO-HTTPS（http 的三種情況）');
-  const webOk = wantCats.every((c) => badCats.has(c)) && goodFindings.length === 0 && fieldsOk && httpOk;
+  // HSTS 太短（低）、CORS 照抄來源但不帶憑證（中）
+  for (const [resp, want] of [
+    [{ ...goodResp, headers: { 'strict-transport-security': 'max-age=100' } }, 'WEB-HSTS-SHORT:低'],
+    [{ ...goodResp, headers: { ...goodResp.headers, 'access-control-allow-origin': CORS_PROBE_ORIGIN } }, 'WEB-CORS-REFLECT:中'],
+  ]) {
+    if (analyzeResponse('https://x.example', 'page', resp).some((f) => `${f.category}:${f.severity}` === want)) badCats.add(want);
+    else wantCats.push(want);
+  }
+  // 不該報的：本機 http 的 Cookie 沒 Secure、轉址判斷不了時的 http、錯誤頁回 200（單頁應用）的內文
+  const quietOk = !analyzeResponse('http://127.0.0.1', 'page', { ...plain, local: true, setCookies: ['sid=1; HttpOnly'] }).length
+    && !analyzeResponse('http://x.example', 'page', { ...plain, redirectUnclear: true }).length
+    && !analyzeResponse('https://x.example', 'error', { ...goodResp, status: 200, body: 'PHP 8.2 at x (/a.js:1:2)' }).length
+    && analyzeResponse('https://x.example', 'error', { ...goodResp, status: 404, body: 'PHP 8.2' }).length === 1;
+  if (!quietOk) wantCats.push('不該報的（本機 http Cookie、轉址判斷不了、錯誤頁回 200）');
+  // 3-4 評分對應：D、F 中，C 低，其餘資訊
+  const obsOk = Object.entries({ F: '中', 'D+': '中', 'C-': '低', B: '資訊', 'A+': '資訊' }).every(([g, s]) => obsSeverity(g) === s);
+  if (!obsOk) wantCats.push('3-4 評分對應風險等級');
+  // 內網主機名稱不送 Observatory
+  const privOk = ['http://localhost', 'https://10.1.2.3', 'https://172.20.0.1', 'https://192.168.1.5', 'https://intranet', 'https://app.corp', 'https://[fd00::1]'].every((x) => isPrivateHost(new URL(x)))
+    && !['https://art-web-abc-de.a.run.app', 'https://8.8.8.8', 'https://172.32.0.1'].some((x) => isPrivateHost(new URL(x)));
+  if (!privOk) wantCats.push('本機與內網主機名稱的判斷');
+  const webOk = wantCats.every((c) => badCats.has(c)) && goodFindings.length === 0 && fieldsOk && httpOk && quietOk && obsOk && privOk;
   if (!webOk) console.error(`❌ 3-3 判斷有誤：該抓的 ${wantCats.filter((c) => !badCats.has(c)).join('、') || '都有'}；正確設定誤判 ${goodFindings.length} 筆；欄位${fieldsOk ? '齊全' : '不齊'}`);
   if (badAccVerdict.pass || badInjVerdict.pass || !leakOk || !cleanOk || !webOk) {
     console.error('❌ 自我測試失敗：負面測資未被攔截！');
     process.exit(1);
   }
-  console.log('✅ [Self-Test 驗證通過] 負面測資（超預算、假畫作幻覺、EDM CC 名單外洩、個資套話、網址預檢的設定缺漏）攔截邏輯運作正常！');
+  console.log('✅ [Self-Test 驗證通過] 負面測資（超預算、假畫作幻覺、EDM CC 名單外洩、個資套話、網址預檢的設定缺漏、Observatory 評分對應與內網主機名稱）攔截邏輯運作正常！');
 }
 
 const { singleReportPath, fullReportPath } = writeReports(params, runScan, runAiEval, codeResult, aiResult, targetDir, evalTarget, webResult);

@@ -19,8 +19,12 @@
  *     web-good  安全設定都對：HSTS 180 天以上、Cookie 有 Secure 與 HttpOnly、不放行別的來源、不露版本
  *     web-bad   全部做錯：沒有 HSTS、Cookie 沒旗標、CORS 照抄來源且允許憑證、Server 露版本、錯誤頁露堆疊與版本
  *     web-302   首頁轉到 https（驗 http 網址「會轉到 https」不算明碼）
+ *     web-hop   首頁先轉到同主機的 /web-hop/login（http），那裡再轉到 https（驗同主機轉址跟著走）
+ *     web-loop  任何路徑都轉到同主機的下一頁，永遠轉不完（驗轉址超過次數時「判斷不了」、不報高）
+ *     web-spa   單頁應用：不存在的網址也回 200 整頁，內文剛好有「PHP 8.2」（驗錯誤頁回 200 時不看內文）
  *   細項 3-4 假 MDN Observatory（POST <模式>/api/v2/scan?host=…）：
- *     obs-good 評分 A+ 全過；obs-bad 評分 D、5 項沒過；obs-err 回 422 掃不了；obs-key 回 401
+ *     obs-good 評分 A+ 全過；obs-bad 評分 D、5 項沒過；obs-err 回 422 掃不了；obs-key 回 401；
+ *     obs-200err 回 200 但帶 error；obs-html 回 200 的 HTML（不是 JSON）；obs-noscore 評分 B、沒給分數
  *   給了 <憑證檔> <金鑰檔> 時再開兩個 https：<埠號檔>.https 只收 TLS 1.2 以上、<埠號檔>.legacy 也收 TLS 1.0／1.1
  *   （主埠號檔最後才寫，測試等它出現就代表全部開好）
  */
@@ -41,10 +45,22 @@ function goodAnswer(body) {
 }
 
 function webAnswer(mode, apiPath, req, res) {
-  const home = apiPath === '/';
-  if (mode === 'web-302') {
-    res.writeHead(302, { Location: 'https://art-web.example.invalid/' });
+  const home = apiPath.split('?')[0] === '/';
+  if (mode === 'web-302' || (mode === 'web-hop' && apiPath === '/login')) {
+    res.writeHead(mode === 'web-302' ? 302 : 301, { Location: 'https://art-web.example.invalid/' });
     return res.end();
+  }
+  if (mode === 'web-hop') {
+    res.writeHead(302, { Location: '/web-hop/login' });
+    return res.end();
+  }
+  if (mode === 'web-loop') {
+    res.writeHead(302, { Location: `/web-loop/next-${Date.now()}` });
+    return res.end();
+  }
+  if (mode === 'web-spa') {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    return res.end('<h1>app</h1><p>後台以 PHP 8.2 改寫</p>');
   }
   if (mode === 'web-good') {
     const headers = { 'Content-Type': 'text/html; charset=utf-8', 'Strict-Transport-Security': 'max-age=31536000; includeSubDomains', Server: 'Google Frontend' };
@@ -67,6 +83,8 @@ const OBS = {
   'obs-bad': [200, { grade: 'D', score: 25, tests_failed: 5, tests_passed: 5, tests_quantity: 10, details_url: OBS_DETAILS, error: null }],
   'obs-err': [422, { error: 'invalid-hostname-lookup', message: 'cannot be resolved' }],
   'obs-key': [401, { error: 'unauthorized' }],
+  'obs-200err': [200, { error: 'site-down', message: 'site is down' }],
+  'obs-noscore': [200, { grade: 'B', tests_failed: 2, tests_passed: 8, tests_quantity: 10, error: null }],
 };
 
 const handler = (req, res) => {
@@ -81,6 +99,10 @@ const handler = (req, res) => {
     const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(obj)); };
 
     if (mode.startsWith('web-')) return webAnswer(mode, apiPath, req, res);
+    if (mode === 'obs-html') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      return res.end('<html><body>Service temporarily unavailable</body></html>');
+    }
     if (OBS[mode]) return apiPath.split('?')[0] === '/api/v2/scan' && req.method === 'POST' ? json(...OBS[mode]) : json(404, { error: 'not found' });
     const wantPath = mode === 'custom' ? '/v2/rec' : '/api/recommend';
     if (!MODES.has(mode) || apiPath !== wantPath) return json(404, { error: 'not found' });
