@@ -238,5 +238,57 @@ printf "\n4\ny\n" | FAKE_SQL_VERSION=MYSQL_8_0 bash "$SH" --item 6 --project pro
 grep -q "sql instances patch db-1 .*--enable-bin-log" "$FAKE_GCLOUD_LOG" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t15b] MySQL 沒開 --enable-bin-log"; }
 grep -q "enable-point-in-time-recovery" "$FAKE_GCLOUD_LOG" && { fail=$((fail+1)); echo "FAIL [t15b] MySQL 不該開 --enable-point-in-time-recovery"; } || pass=$((pass+1))
 
+# 16. 費用精算第 8 項 Artifact Analysis：照狀態檔的 SAVED_IMAGE_SCAN_ENABLED（3-5 記下的）算，讀小數參數。
+#     腳本複製到暫存的假 repo 跑，參數檔換成跟正式值、預設值都不同的數字（0.4×30×31.25＝375；一次 0.4×31.25＝12.5 → 四捨五入 13）
+R16="$S/r16"; mkdir -p "$R16/lazy-pack" "$R16/config" "$R16/reports"
+cp "$SH" "$R16/lazy-pack/"
+ST16="$R16/reports/.lazy-pack-state.env"
+p16() {   # p16 <每份美元> <每月部署次數> <匯率>：從正式參數檔換掉這三個值
+  sed -E -e "s/^(  \"image_scan_usd_per_image\": ).*/\1$1,/" -e "s/^(  \"image_scan_deploys_per_month\": ).*/\1$2,/" \
+    -e "s/^(  \"usd_twd_rate\": ).*/\1$3/" "$R/config/params.json" > "$R16/config/params.json"
+}
+run16() { bash "$R16/lazy-pack/gcp-setup-and-check.sh" --stage cost --check-only --project proj-a < /dev/null > "$S/out.txt" 2>&1; }
+p16 0.4 30 31.25
+grep -q '"usd_twd_rate": 31.25$' "$R16/config/params.json" && ! grep -q '"usd_twd_rate": 31.25' "$R/config/params.json" \
+  && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t16] 自訂參數檔沒換到，或跟正式值一樣"; }
+printf 'SAVED_PROJECT_ID="proj-a"\nSAVED_IMAGE_SCAN_ENABLED=1\n' > "$ST16"
+run16; rc_is t16a $? 0
+chk t16a "8. \[選配映像檔掃描\] Artifact Analysis"
+chk t16a "已開通自動掃描（每次部署 US\$0.4，以每月 30 次估"
+chk t16a "預估月費：約 NT\$375 / 月"
+chk t16a "日常營運預估總月費：約 NT\$870 ～ NT\$995 / 月"   # 480+15+375 ～ 560+60+375
+nochk t16a "注意：參數檔"
+grep -q "| \*\*8. \[選配\] Artifact Analysis 映像檔掃描\*\* | 已開通自動掃描.* | \*\*約 NT\$375\*\* |" "$R16/reports/full-execution-report.md" \
+  && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t16a] 累計總報告沒有第 8 項 NT\$375"; }
+grep -q "約 NT\$870～995 / 月" "$R16/reports/full-execution-report.md" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t16a] 累計總報告的合計沒算進第 8 項"; }
+L16="$(find "$R16/reports" -maxdepth 1 -name 'stage-cost-report-*.md' | sort | tail -1)"
+[ -n "$L16" ] && grep -q "8. \[選配\] Artifact Analysis 映像檔掃描.*約 NT\$375" "$L16" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t16a] 單次報告沒有第 8 項"; }
+grep -q "3-5 映像檔漏洞掃描" "$R16/reports/full-execution-report.md" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t16a] 總覽表第三階段沒列 3-5"; }
+grep -qx 'SAVED_IMAGE_SCAN_ENABLED=1' "$ST16" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t16a] 狀態檔沒留下 SAVED_IMAGE_SCAN_ENABLED=1"; }
+# 沒開通：第 8 項 NT$0，合計不加；立即掃描的單價四捨五入
+printf 'SAVED_PROJECT_ID="proj-a"\nSAVED_IMAGE_SCAN_ENABLED=0\n' > "$ST16"
+run16; rc_is t16b $? 0
+chk t16b "未開通（立即掃描一次 US\$0.4，約 NT\$13，只在掃的時候收）"
+chk t16b "預估月費：約 NT\$0 / 月"
+chk t16b "日常營運預估總月費：約 NT\$495 ～ NT\$620 / 月"
+# 狀態檔的值看不懂（mjs 寫的是 0／1）：當成沒開通，寫回 0
+printf 'SAVED_PROJECT_ID="proj-a"\nSAVED_IMAGE_SCAN_ENABLED="yes"\n' > "$ST16"
+run16; rc_is t16c $? 0
+chk t16c "未開通（立即掃描一次"
+grep -qx 'SAVED_IMAGE_SCAN_ENABLED=0' "$ST16" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t16c] 看不懂的值沒寫回 0"; }
+# 參數不合法：負數、超出範圍、0 次、加了引號 → 各自警告並照預設（0.26×20×32.5＝169）
+printf 'SAVED_PROJECT_ID="proj-a"\nSAVED_IMAGE_SCAN_ENABLED=1\n' > "$ST16"
+p16 -1 0 60.5
+run16; rc_is t16d $? 0
+chk t16d "image_scan_usd_per_image 讀不到或格式不合法，這次照預設值 0.26 跑"
+chk t16d "image_scan_deploys_per_month=0 超出合法範圍 (1~1000)，這次照預設值 20 跑"
+chk t16d "usd_twd_rate=60.5 超出合法範圍 (20~50)，這次照預設值 32.5 跑"
+chk t16d "預估月費：約 NT\$169 / 月"
+p16 10 1000 '"50"'
+run16; rc_is t16e $? 0
+chk t16e "usd_twd_rate 讀不到或格式不合法，這次照預設值 32.5 跑"
+nochk t16e "注意：參數檔.*image_scan"   # 範圍兩端（10、1000）要收
+chk t16e "預估月費：約 NT\$325000 / 月"   # 10×1000×32.5
+
 echo "PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]

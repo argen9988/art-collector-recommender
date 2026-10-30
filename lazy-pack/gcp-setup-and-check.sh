@@ -111,6 +111,9 @@ API_QUOTA_RPD=1000
 API_QUOTA_RPM=30
 BACKUP_RETENTION_DAYS=14
 EDM_DAILY_SEND_LIMIT=100
+IMAGE_SCAN_USD_PER_IMAGE=0.26
+IMAGE_SCAN_DEPLOYS_PER_MONTH=20
+USD_TWD_RATE=32.5
 
 read_json_int() {
   local file="$1"
@@ -137,6 +140,33 @@ read_json_int() {
   echo "$val"
 }
 
+# 讀小數（例如 0.26、32.5）：只收不帶正負號的十進位數字，範圍用 awk 比（bash 只會算整數）
+read_json_num() {
+  local file="$1"
+  local key="$2"
+  local default_val="$3"
+  local min_val="$4"
+  local max_val="$5"
+  if [ -z "$file" ] || [ ! -f "$file" ]; then
+    echo "$default_val"
+    return 0
+  fi
+  local val
+  val="$(grep -E "^  \"${key}\"[[:space:]]*:" "$file" | tail -n 1 | sed -E 's/^[^:]*:[[:space:]]*//; s/[[:space:],]*$//')"
+  val="${val%$'\r'}"
+  if ! [[ "$val" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+    echo "注意：參數檔 ${file} 的 ${key} 讀不到或格式不合法，這次照預設值 ${default_val} 跑。" >&2
+    echo "$default_val"
+    return 0
+  fi
+  if ! awk -v v="$val" -v lo="$min_val" -v hi="$max_val" 'BEGIN { exit !(v + 0 >= lo + 0 && v + 0 <= hi + 0) }'; then
+    echo "注意：參數檔 ${file} 的 ${key}=${val} 超出合法範圍 (${min_val}~${max_val})，這次照預設值 ${default_val} 跑。" >&2
+    echo "$default_val"
+    return 0
+  fi
+  echo "$val"
+}
+
 if [ -n "$PARAMS_FILE" ]; then
   BUDGET_MONTHLY_NTD="$(read_json_int "$PARAMS_FILE" "budget_monthly_ntd" 1000 300 50000)"
   DB_TARGET_MONTHLY_NTD="$(read_json_int "$PARAMS_FILE" "db_target_monthly_ntd" 550 250 10000)"
@@ -144,6 +174,9 @@ if [ -n "$PARAMS_FILE" ]; then
   API_QUOTA_RPM="$(read_json_int "$PARAMS_FILE" "api_quota_rpm" 30 5 1000)"
   BACKUP_RETENTION_DAYS="$(read_json_int "$PARAMS_FILE" "backup_retention_days" 14 7 365)"
   EDM_DAILY_SEND_LIMIT="$(read_json_int "$PARAMS_FILE" "edm_daily_send_limit" 100 10 10000)"
+  IMAGE_SCAN_USD_PER_IMAGE="$(read_json_num "$PARAMS_FILE" "image_scan_usd_per_image" 0.26 0 10)"
+  IMAGE_SCAN_DEPLOYS_PER_MONTH="$(read_json_int "$PARAMS_FILE" "image_scan_deploys_per_month" 20 1 1000)"
+  USD_TWD_RATE="$(read_json_num "$PARAMS_FILE" "usd_twd_rate" 32.5 20 50)"
 else
   echo "注意：找不到 config/params.json，這次照程式內建預設值跑（每月預算 NT\$${BUDGET_MONTHLY_NTD}、資料庫參考月租 NT\$${DB_TARGET_MONTHLY_NTD}）。"
 fi
@@ -164,6 +197,7 @@ SAVED_EDM_MAX_NTD=0
 SAVED_SECRET_COUNT=2
 SAVED_EDM_SECRET_COUNT=0
 SAVED_SOURCE_DIR=""
+SAVED_IMAGE_SCAN_ENABLED=0   # 細項 3-5（code-and-ai-audit.mjs）查到的自動掃描開通狀態，這裡只讀、照原樣寫回
 
 if [ -f "$STATE_FILE" ]; then
   while IFS='=' read -r s_key s_val; do
@@ -186,6 +220,7 @@ if [ -f "$STATE_FILE" ]; then
       SAVED_SECRET_COUNT)    [[ "$s_val" =~ ^[0-9]+$ ]] && SAVED_SECRET_COUNT="$s_val" ;;
       SAVED_EDM_SECRET_COUNT) [[ "$s_val" =~ ^[0-9]+$ ]] && SAVED_EDM_SECRET_COUNT="$s_val" ;;
       SAVED_SOURCE_DIR)      SAVED_SOURCE_DIR="$s_val" ;;
+      SAVED_IMAGE_SCAN_ENABLED) [[ "$s_val" =~ ^[01]$ ]] && SAVED_IMAGE_SCAN_ENABLED="$s_val" ;;
     esac
   done < "$STATE_FILE"
 fi
@@ -1208,11 +1243,26 @@ AI_CAP_MONTHLY_MAX_NTD=$(( (API_QUOTA_RPD * 30 * 10) / 1000 ))
 [ "$AI_CAP_MONTHLY_MIN_NTD" -lt 30 ] && AI_CAP_MONTHLY_MIN_NTD=30
 [ "$AI_CAP_MONTHLY_MAX_NTD" -lt 90 ] && AI_CAP_MONTHLY_MAX_NTD=90
 
-TOTAL_NORMAL_MIN_NTD=$(( SAVED_DB_MIN_NTD + AI_DAILY_NORMAL_MIN_NTD ))
-TOTAL_NORMAL_MAX_NTD=$(( SAVED_DB_MAX_NTD + AI_DAILY_NORMAL_MAX_NTD ))
+# 細項 3-5 Artifact Analysis：開通自動掃描（狀態檔的 SAVED_IMAGE_SCAN_ENABLED，由 code-and-ai-audit.mjs 查到後記下）時，
+# 每月費用＝每份映像檔費用（美元）× 每月部署次數 × 匯率，四捨五入到元；沒開通是 NT$0（立即掃描只在掃的時候收）
+IMAGE_SCAN_PER_SCAN_NTD="$(awk -v u="$IMAGE_SCAN_USD_PER_IMAGE" -v r="$USD_TWD_RATE" 'BEGIN { printf "%d", u * r + 0.5 }')"
+IMAGE_SCAN_MONTHLY_NTD=0
+if [ "$SAVED_IMAGE_SCAN_ENABLED" = "1" ]; then
+  IMAGE_SCAN_MONTHLY_NTD="$(awk -v u="$IMAGE_SCAN_USD_PER_IMAGE" -v d="$IMAGE_SCAN_DEPLOYS_PER_MONTH" -v r="$USD_TWD_RATE" 'BEGIN { printf "%d", u * d * r + 0.5 }')"
+  IMAGE_SCAN_STATUS="已開通自動掃描（每次部署 US\$${IMAGE_SCAN_USD_PER_IMAGE}，以每月 ${IMAGE_SCAN_DEPLOYS_PER_MONTH} 次估，匯率是估的）"
+  IMAGE_SCAN_CELL="**約 NT\$${IMAGE_SCAN_MONTHLY_NTD}**"
+  IMAGE_SCAN_CAP_CELL="**約 NT\$${IMAGE_SCAN_MONTHLY_NTD}**（依實際部署次數）"
+else
+  IMAGE_SCAN_STATUS="未開通（立即掃描一次 US\$${IMAGE_SCAN_USD_PER_IMAGE}，約 NT\$${IMAGE_SCAN_PER_SCAN_NTD}，只在掃的時候收）"
+  IMAGE_SCAN_CELL="**NT\$0**"
+  IMAGE_SCAN_CAP_CELL="**NT\$0**"
+fi
+
+TOTAL_NORMAL_MIN_NTD=$(( SAVED_DB_MIN_NTD + AI_DAILY_NORMAL_MIN_NTD + IMAGE_SCAN_MONTHLY_NTD ))
+TOTAL_NORMAL_MAX_NTD=$(( SAVED_DB_MAX_NTD + AI_DAILY_NORMAL_MAX_NTD + IMAGE_SCAN_MONTHLY_NTD ))
 CLOUD_RUN_CAP_MAX_NTD=50
-TOTAL_CAP_MIN_NTD=$(( SAVED_DB_MIN_NTD + AI_CAP_MONTHLY_MIN_NTD + SAVED_EDM_MAX_NTD ))
-TOTAL_CAP_MAX_NTD=$(( SAVED_DB_MAX_NTD + AI_CAP_MONTHLY_MAX_NTD + SAVED_EDM_MAX_NTD + CLOUD_RUN_CAP_MAX_NTD ))
+TOTAL_CAP_MIN_NTD=$(( SAVED_DB_MIN_NTD + AI_CAP_MONTHLY_MIN_NTD + SAVED_EDM_MAX_NTD + IMAGE_SCAN_MONTHLY_NTD ))
+TOTAL_CAP_MAX_NTD=$(( SAVED_DB_MAX_NTD + AI_CAP_MONTHLY_MAX_NTD + SAVED_EDM_MAX_NTD + CLOUD_RUN_CAP_MAX_NTD + IMAGE_SCAN_MONTHLY_NTD ))
 
 if [ "$TOTAL_NORMAL_MAX_NTD" -le "$BUDGET_MONTHLY_NTD" ]; then
   BUDGET_VERDICT="✅ 安全合規（日常預估總月費 NT\$${TOTAL_NORMAL_MIN_NTD}～${TOTAL_NORMAL_MAX_NTD} 低於您設定的每月預算警示上限 NT\$${BUDGET_MONTHLY_NTD}）"
@@ -1233,6 +1283,8 @@ echo " 4. [雲端保險箱]   Secret Manager            ：目前已建 ${SAVED_
 echo " 5. [門禁白名單]   Google OAuth 2.0 Testing  ：已啟用 (基礎驗證永久免費)        ➔ 預估月費：NT\$0"
 echo " 6. [選配 AI 平台] Google Cloud Vertex AI    ：${SAVED_VERTEX_STATUS}"
 echo " 7. [選配排程發信] Cloud Scheduler + EDM API ：${SAVED_EDM_STATUS}"
+echo " 8. [選配映像檔掃描] Artifact Analysis      ：${IMAGE_SCAN_STATUS}"
+echo "                                              ➔ 預估月費：約 NT\$${IMAGE_SCAN_MONTHLY_NTD} / 月"
 echo "------------------------------------------------------------------------------"
 echo " 📊 【每月預估總花費合計】："
 echo "    • 日常營運預估總月費：約 NT\$${TOTAL_NORMAL_MIN_NTD} ～ NT\$${TOTAL_NORMAL_MAX_NTD} / 月"
@@ -1267,6 +1319,7 @@ SAVED_PROJECT_ID="${PROJECT_ID}"
 SAVED_CLOUD_RUN_SERVICE="${CLOUD_RUN_SERVICE}"
 SAVED_CLOUD_RUN_URL="${CLOUD_RUN_URL}"
 SAVED_SOURCE_DIR="${SAVED_SOURCE_DIR}"
+SAVED_IMAGE_SCAN_ENABLED=${SAVED_IMAGE_SCAN_ENABLED}
 EOF
 fi
 
@@ -1315,6 +1368,7 @@ FULL_REPORT_FILE="${REPORTS_DIR}/full-execution-report.md"
   echo "| **5. Google OAuth 2.0（白名單登入）** | Testing 模式白名單（永久免費） | **NT\$0** | **NT\$0** |"
   echo "| **6. [選配] Vertex AI API** | ${SAVED_VERTEX_STATUS} | **NT\$0** | 依實際呼叫量 |"
   echo "| **7. [選配] 排程自動發送 EDM** | ${SAVED_EDM_STATUS} | **NT\$0** | **NT\$0**（免費層內） |"
+  echo "| **8. [選配] Artifact Analysis 映像檔掃描** | ${IMAGE_SCAN_STATUS} | ${IMAGE_SCAN_CELL} | ${IMAGE_SCAN_CAP_CELL} |"
   echo "| **📊 每月預估總花費合計** | **對照每月預算警示上限：NT\$${BUDGET_MONTHLY_NTD} / 月** | **約 NT\$${TOTAL_NORMAL_MIN_NTD}～${TOTAL_NORMAL_MAX_NTD} / 月** | **約 NT\$${TOTAL_CAP_MIN_NTD}～${TOTAL_CAP_MAX_NTD} / 月** |"
   echo ""
   echo "> **預算合規判定**：${BUDGET_VERDICT}"
@@ -1337,7 +1391,7 @@ FULL_REPORT_FILE="${REPORTS_DIR}/full-execution-report.md"
   echo "| :--- | :--- | :---: | :--- |"
   echo "| **第一階段：立即止血與基礎防護** | 1-1 切換 Paid Tier 零訓練保障<br>1-2 雙 Owner 帳號共管<br>1-3 預算提醒、API 硬上限與 Gmail 白名單 | ${STAGE1_LAST_RUN} | ${STAGE1_SUMMARY} |"
   echo "| **第二階段：系統架構加固與規格選型** | 2-1 Secret Manager 金鑰隔離<br>2-2 Cloud SQL 關公網 IP / SSL / 每日備份<br>2-3 資料庫月租規格選單<br>2-4 & 2-5 選配 Vertex AI / 排程 EDM | ${STAGE2_LAST_RUN} | ${STAGE2_SUMMARY} |"
-  echo "| **第三階段：上線前原始碼與 AI 總體檢** | 3-1 原始碼金鑰 0 外洩靜態掃描<br>3-2 20 題 AI 推薦準確度與防套話紅隊測試 | ${STAGE3_LAST_RUN} | ${STAGE3_SUMMARY} |"
+  echo "| **第三階段：上線前原始碼與 AI 總體檢** | 3-1 原始碼金鑰 0 外洩靜態掃描<br>3-2 20 題 AI 推薦準確度與防套話紅隊測試<br>3-3 網址預檢<br>3-4 MDN Observatory 評分<br>3-5 映像檔漏洞掃描 | ${STAGE3_LAST_RUN} | ${STAGE3_SUMMARY} |"
   echo ""
   echo "## 二、 💰 雲端服務開啟清單與每月費用精算總表"
   echo ""
@@ -1350,6 +1404,7 @@ FULL_REPORT_FILE="${REPORTS_DIR}/full-execution-report.md"
   echo "| **5. Google OAuth 2.0（白名單登入）** | Testing 模式白名單（永久免費） | **NT\$0** | **NT\$0** |"
   echo "| **6. [選配] Vertex AI API** | ${SAVED_VERTEX_STATUS} | **NT\$0** | 依實際呼叫量 |"
   echo "| **7. [選配] 排程自動發送 EDM** | ${SAVED_EDM_STATUS} | **NT\$0** | **NT\$0**（免費層內） |"
+  echo "| **8. [選配] Artifact Analysis 映像檔掃描** | ${IMAGE_SCAN_STATUS} | ${IMAGE_SCAN_CELL} | ${IMAGE_SCAN_CAP_CELL} |"
   echo "| **📊 每月預估總花費合計** | **對照每月預算警示上限：NT\$${BUDGET_MONTHLY_NTD} / 月** | **約 NT\$${TOTAL_NORMAL_MIN_NTD}～${TOTAL_NORMAL_MAX_NTD} / 月** | **約 NT\$${TOTAL_CAP_MIN_NTD}～${TOTAL_CAP_MAX_NTD} / 月** |"
   echo ""
   echo "> **預算合規判定**：${BUDGET_VERDICT}"

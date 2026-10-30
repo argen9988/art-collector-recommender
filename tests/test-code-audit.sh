@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# code-and-ai-audit.mjs 自動測試：--target 防呆、三種原始碼來源（假 gcloud、本機假 git repo、假 ZIP）、3-2 線上測試、3-3／3-4 網址檢查（假網站與假 Observatory），不連雲端、不花錢
+# code-and-ai-audit.mjs 自動測試：--target 防呆、三種原始碼來源（假 gcloud、本機假 git repo、假 ZIP）、3-2 線上測試、3-3／3-4 網址檢查（假網站與假 Observatory）、3-5 映像檔掃描（假 gcloud），不連雲端、不花錢
 # 用法：bash tests/test-code-audit.sh（結果暫存寫到系統暫存資料夾，跑完還原 reports/ 狀態檔）
 T="$(cd -P "$(dirname "$0")" && pwd -P)"
 S="$(mktemp -d)"; [ -n "$S" ] && [ -d "$S" ] || exit 2
@@ -515,6 +515,132 @@ else
 fi
 kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; SRV=
 export LAZY_PACK_OBSERVATORY_API="http://127.0.0.1:1/never"
+
+# 11. 細項 3-5 Artifact Analysis：假 gcloud 的 FAKE_AUTO_SCAN／FAKE_ON_DEMAND 當成已開通，
+#     FAKE_IMAGE_DESCRIBE／FAKE_SCAN_VULNS 指到假的掃描結果（弱點編號 CVE-2099-* 是虛構的）
+export FAKE_GCLOUD_LOG="$(mp "$S/gl11.txt")"
+gl_has() { if grep -q -- "$2" "$FAKE_GCLOUD_LOG"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL [$1] 假 gcloud 沒收到: $2"; fi; }
+gl_not() { if grep -q -- "$2" "$FAKE_GCLOUD_LOG"; then fail=$((fail+1)); echo "FAIL [$1] 假 gcloud 不該收到: $2"; else pass=$((pass+1)); fi; }
+st11() { printf 'SAVED_PROJECT_ID="proj-a"\nSAVED_CLOUD_RUN_SERVICE="art-web"\n%s' "${1:-}" > "$ST"; : > "$FAKE_GCLOUD_LOG"; }
+# 自動掃描的結果：0001 高＋有修補（兩個套件、兩筆 occurrence 要合成一筆）、0002 高（CRITICAL）沒修補、
+# 0003 低＋有修補（fixedLocation）、0004 中、修補版本是 MAXIMUM（＝沒有修補）；只有 0001 會擋
+occ() { printf '{"name":"projects/proj-a/occurrences/%s","kind":"VULNERABILITY","noteName":"projects/goog-vulnz/notes/%s","vulnerability":{"effectiveSeverity":"%s"%s,"packageIssue":[%s]}}' "$@"; }
+V1="$(occ o1 CVE-2099-0001 HIGH ',"fixAvailable":true' '{"affectedPackage":"openssl","fixedVersion":{"kind":"NORMAL","name":"3.0.99"}}')"
+V1b="$(occ o1b CVE-2099-0001 HIGH '' '{"affectedPackage":"libssl3","fixedVersion":{"kind":"NORMAL","name":"3.0.99"}}')"
+V2="$(occ o2 CVE-2099-0002 CRITICAL ',"fixAvailable":false' '{"affectedPackage":"zlib","fixedVersion":{"kind":"MAXIMUM"}}')"
+V3="$(occ o3 CVE-2099-0003 LOW '' '{"affectedLocation":{"package":"curl"},"fixedLocation":{"version":{"kind":"NORMAL","name":"8.99"}}}')"
+V4="$(occ o4 CVE-2099-0004 MEDIUM '' '{"affectedPackage":"bash","fixedVersion":{"kind":"MAXIMUM"}}')"
+DONE='{"kind":"DISCOVERY","discovery":{"analysisStatus":"FINISHED_SUCCESS"}}'
+printf '{"image_summary":{"fully_qualified_digest":"x"},"discovery_summary":{"discovery":[%s]},"package_vulnerability_summary":{"vulnerabilities":{"HIGH":[%s,%s],"CRITICAL":[%s],"LOW":[%s],"MEDIUM":[%s]}}}\n' "$DONE" "$V1" "$V1b" "$V2" "$V3" "$V4" > "$S/img-mixed.json"
+printf '{"discovery_summary":{"discovery":[%s]},"package_vulnerability_summary":{"vulnerabilities":{"CRITICAL":[%s]}}}\n' "$DONE" "$V2" > "$S/img-nofix.json"
+printf '{"discovery_summary":{"discovery":[%s]}}\n' "$DONE" > "$S/img-clean.json"
+printf '{"discovery_summary":{"discovery":[{"kind":"DISCOVERY","discovery":{"analysisStatus":"PENDING"}}]}}\n' > "$S/img-pending.json"
+printf '[%s,%s,%s,%s,%s]\n' "$V1" "$V1b" "$V2" "$V3" "$V4" > "$S/scan-mixed.json"
+IMG_NTD="$(node -e 'const p=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8"));console.log(Math.round(p.image_scan_usd_per_image*p.image_scan_deploys_per_month*p.usd_twd_rate))' "$(mp "$R/config/params.json")")"
+
+# 沒開通、不是終端機：不問、不開通（管線的 y 不算同意）；--image-scan 沒結果 → 結束碼 2，不動 findings.json
+st11
+printf '[{"category":"WEB-OLD","id":"KEEP"}]\n' > "$FND"; cp "$FND" "$S/fnd.old"
+printf 'y\ny\n' | run --image-scan; rc_is t11a $? 2
+chk t11a "不是在終端機執行：開通自動掃描與立即掃描會花錢，只認 --enable-image-scan、--scan-now"
+chk t11a "專案還沒開通自動掃描（containerscanning.googleapis.com）"
+chk t11a "細項 3-5 未執行：沒有開通自動掃描，要開通請加 --enable-image-scan 或在終端機回答 y；要立即掃描請加 --scan-now"
+chk t11a "❌ --image-scan 這次沒有掃描結果"
+nochk t11a "PASS"
+gl_has t11a "run revisions describe art-web-00002"
+gl_not t11a "services enable"
+gl_not t11a "images scan"
+cmp -s "$FND" "$S/fnd.old" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t11a] 沒有結果時不該改寫 findings.json"; }
+grep -q '^SAVED_IMAGE_SCAN_ENABLED=0' "$ST" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t11a] 狀態檔沒記下沒開通（0）"; }
+grep -q "8. \[選配\] Artifact Analysis 映像檔掃描\*\* | 未開通" "$FULL" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t11a] 累計總報告第 8 項應是未開通"; }
+
+# --enable-image-scan：開通 containerscanning；現在上線的版本要等下次部署（沒結果、結束碼 2），報告第 8 項照開通算
+st11
+run --image-scan --enable-image-scan < /dev/null; rc_is t11b $? 2
+gl_has t11b "services enable containerscanning.googleapis.com --project=proj-a"
+gl_not t11b "ondemandscanning"
+chk t11b "已開通自動掃描。剛開通自動掃描，現在上線的版本要等下次部署才會被掃"
+grep -q '^SAVED_IMAGE_SCAN_ENABLED=1' "$ST" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t11b] 狀態檔沒記下已開通（1）"; }
+grep -q "8. \[選配\] Artifact Analysis 映像檔掃描\*\* | 已開通自動掃描.* | \*\*約 NT\$$IMG_NTD\*\* |" "$FULL" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t11b] 累計總報告第 8 項應是 NT\$$IMG_NTD"; }
+# 開通失敗：專案維持原狀，狀態檔記沒開通
+st11
+FAKE_GCLOUD_FAIL="services enable" run --image-scan --enable-image-scan < /dev/null; rc_is t11b2 $? 2
+chk t11b2 "開通失敗"
+grep -q '^SAVED_IMAGE_SCAN_ENABLED=0' "$ST" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t11b2] 開通失敗不該記成已開通"; }
+
+# 自動掃描有結果：同一個 CVE 合成一筆，只有「高、中＋有修補版本」擋；findings.json 只換 IMG- 開頭的舊結果
+st11
+printf '[{"category":"WEB-OLD","id":"KEEP"},{"category":"IMG-VULN","id":"OLD-IMG"}]\n' > "$FND"
+FAKE_AUTO_SCAN=1 FAKE_IMAGE_DESCRIBE="$(mp "$S/img-mixed.json")" run --image-scan < /dev/null; rc_is t11c $? 1
+chk t11c "❌ 3-5 未通過（自動掃描：4 個弱點，其中 1 個高、中風險已有修補版本）"
+chk t11c "\[IMG-VULN\] CVE-2099-0001（套件：openssl、libssl3）：已有修補版本"
+nochk t11c "\[IMG-VULN\] CVE-2099-0002"
+nochk t11c "\[IMG-VULN\] CVE-2099-0004"
+chk t11c "第三階段總體檢結果：FAIL"
+gl_not t11c "services enable"
+gl_not t11c "images scan"
+node -e '
+const f = JSON.parse(require("fs").readFileSync(process.argv[1], "utf-8"));
+const img = f.filter((x) => x.category === "IMG-VULN");
+const ok = f.some((x) => x.id === "KEEP") && !f.some((x) => x.id === "OLD-IMG") && img.length === 4
+  && img.every((x) => x.cwe === "CWE-1395" && x.sources[0] === "Artifact Analysis" && /docker\.pkg\.dev\/proj-a\/.*@sha256:/.test(x.target))
+  && img.map((x) => x.severity).join() === "高,高,中,低";
+process.exit(ok ? 0 : 1);' "$(mp "$FND")" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t11c] findings.json 的 IMG-VULN 不對（要 4 筆、舊的 IMG 換掉、WEB 留著）"; }
+LATEST="$(latest_rep)"
+[ -n "$LATEST" ] && grep -q "映像檔漏洞" "$LATEST" && grep -q "CVE-2099-0001" "$LATEST" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t11c] 單次報告沒有映像檔漏洞那一節"; }
+# 高風險但沒有修補版本：記著、不擋；沒有弱點：通過
+st11
+FAKE_AUTO_SCAN=1 FAKE_IMAGE_DESCRIBE="$(mp "$S/img-nofix.json")" run --image-scan < /dev/null; rc_is t11d $? 0
+chk t11d "✅ 3-5 通過（自動掃描：1 個弱點，其中 1 個高、中風險還沒有修補版本）"
+chk t11d "第三階段總體檢結果：PASS"
+st11
+FAKE_AUTO_SCAN=1 FAKE_IMAGE_DESCRIBE="$(mp "$S/img-clean.json")" run --image-scan < /dev/null; rc_is t11d2 $? 0
+chk t11d2 "✅ 3-5 通過（自動掃描：0 個弱點，沒有高、中風險）"
+# 還在掃：沒結果、結束碼 2
+st11
+FAKE_AUTO_SCAN=1 FAKE_IMAGE_DESCRIBE="$(mp "$S/img-pending.json")" run --image-scan < /dev/null; rc_is t11e $? 2
+chk t11e "自動掃描還在跑，過幾分鐘再跑一次 3-5"
+
+# --scan-now：自動掃描沒結果 → 先開通 ondemandscanning，再立即掃描（資料處理地點照 asia-east1 → asia）
+st11
+FAKE_AUTO_SCAN=1 FAKE_SCAN_VULNS="$(mp "$S/scan-mixed.json")" run --image-scan --scan-now < /dev/null; rc_is t11f $? 1
+chk t11f "這份映像檔還沒有自動掃描的結果"
+gl_has t11f "services enable ondemandscanning.googleapis.com --project=proj-a"
+gl_has t11f "artifacts docker images scan .*--remote --location=asia"
+gl_has t11f "list-vulnerabilities projects/proj-a/locations/asia/scans/fake-scan-1"
+chk t11f "❌ 3-5 未通過（立即掃描：4 個弱點，其中 1 個高、中風險已有修補版本）"
+# 已開通 On-Demand Scanning：不再開通
+st11
+FAKE_AUTO_SCAN=1 FAKE_ON_DEMAND=1 FAKE_SCAN_VULNS="$(mp "$S/scan-mixed.json")" run --image-scan --scan-now < /dev/null; rc_is t11f2 $? 1
+gl_not t11f2 "services enable"
+gl_has t11f2 "images scan"
+
+# 不在 Artifact Registry（gcr.io）：掃不了、不呼叫掃描
+st11
+FAKE_IMAGE_REF="gcr.io/proj-a/art-web@sha256:$(printf 'b%.0s' {1..64})" FAKE_AUTO_SCAN=1 run --image-scan --scan-now < /dev/null; rc_is t11g $? 2
+chk t11g "不在 Artifact Registry（或沒有 digest），Artifact Analysis 掃不了"
+gl_not t11g "images describe"
+gl_not t11g "images scan"
+# 專案有兩個網站、狀態檔沒記是哪一個：不猜
+printf 'SAVED_PROJECT_ID="proj-a"\n' > "$ST"; : > "$FAKE_GCLOUD_LOG"
+run --image-scan < /dev/null; rc_is t11h $? 2
+chk t11h "專案裡有 2 個網站，不知道是哪一個"
+# --mock 不連雲端
+st11
+run --image-scan --mock < /dev/null; rc_is t11i $? 2
+chk t11i "3-5 映像檔掃描：⏭️ 未執行（帶了 --mock，不連雲端）\|--image-scan 這次沒有掃描結果：帶了 --mock，不連雲端"
+[ -s "$FAKE_GCLOUD_LOG" ] && { fail=$((fail+1)); echo "FAIL [t11i] --mock 呼叫了 gcloud"; } || pass=$((pass+1))
+# --run-ai-eval 不知道專案：3-5 只跳過，不像 --image-scan 結束碼 2
+rm -f "$ST"; : > "$FAKE_GCLOUD_LOG"
+run --run-ai-eval --target "$(mp "$FIX")" < /dev/null; rc_is t11j $? 0
+chk t11j "細項 3-5 未執行：還不知道是哪個 GCP 專案"
+nochk t11j "--image-scan 這次沒有掃描結果"
+# 旗標單獨用沒有作用要說
+rm -f "$ST"
+run --eval-only --mock --scan-now < /dev/null; rc_is t11k $? 0
+chk t11k "--enable-image-scan、--scan-now 要搭配 --image-scan 或 --run-ai-eval 才會跑 3-5，這次沒有作用"
+unset FAKE_GCLOUD_LOG
+rm -f "$ST"
 
 echo "PASS=$pass FAIL=$fail SKIP=$skip"
 [ "$fail" -eq 0 ] && [ "$skip" -eq 0 ]
