@@ -58,7 +58,7 @@
 8. **【細項 2-5（🟢 非必要選配 2）】是否啟用「排程自動發送客製化 EDM」定時器（Cloud Scheduler）**：
    - 若目前由業務手動查詢或按鈕寄信，**預設建議跳過**；若需定時自動跑「以人推畫／以畫推人」發信再開啟（前 3 個排程免費 **NT$0**）。
 
-### 🔹 第三階段：上線前原始碼與 AI 總體檢（共 4 項）
+### 🔹 第三階段：上線前原始碼與 AI 總體檢（共 5 項）
 9. **【細項 3-1】本機原始碼金鑰外洩自動掃描（SAST）**：
    - AI 自動翻遍所有網站程式碼，確認 0 硬編碼金鑰、0 `NEXT_PUBLIC_` 機密外洩（只讀不改、**NT$0**）。
 10. **【細項 3-2】20 題 AI 推薦準確度與「防惡意套話（Prompt Injection）」紅隊壓力測試**：
@@ -67,6 +67,8 @@
     - 連幾次網站首頁與錯誤頁，檢查 HSTS、Cookie 的 Secure／HttpOnly、CORS、TLS 1.0／1.1、錯誤頁有沒有露出版本；高、中風險會讓第三階段不通過，結果寫進 `reports/findings.json`（連不上網站時不改寫）（**NT$0**）。
 12. **【細項 3-4】MDN HTTP Observatory 安全評分**：
     - 只把主機名稱送給 Mozilla 的免費服務評 A+～F（**NT$0**，不需金鑰）；掃描紀錄是公開的，所以送出前先問您（AI 代跑時要您同意、加上 --observatory 才送），本機與內網的網址、連不上的網站不送。評分 D、F 會讓第三階段不通過；沒同意、Observatory 拿不到結果時不擋。
+13. **【細項 3-5】Artifact Analysis 容器映像檔漏洞掃描**：
+    - 查網站容器映像檔（要放在 Artifact Registry）有沒有已知的套件漏洞；**開通自動掃描與「立即掃描」都會花錢（一份映像檔 US$0.26）**，所以要您同意（AI 代跑時加 --enable-image-scan、--scan-now；沒加時只有在終端機會問，從管線回答 y 不算同意）。高、中風險而且**已有修補版本**的漏洞會讓第三階段不通過；還沒有修補版本的照樣列進報告與 `reports/findings.json`，但不擋上線。沒有掃描結果（沒開通、還在掃、不在 Artifact Registry）時，單跑 --image-scan 結束碼是 2，全跑時只在報告註明。
 
 ---
 
@@ -85,6 +87,7 @@ Lazy Pack 內建自動費用精算器（可隨時執行 `bash lazy-pack/gcp-setu
 | **5. Google OAuth 2.0** | 同仁 Gmail 白名單 | Google Identity 基礎登入與 Testing 白名單攔截永久免費 | **NT$0** | **NT$0** |
 | **6. Vertex AI API** | 🟢 選配企業 AI 平台 | 預設不開啟為 NT$0；若開啟無基本月租，按呼叫量計費 | **NT$0** | 依實際呼叫量 |
 | **7. 排程自動發送 EDM** | 🟢 選配定時器+發信 | Cloud Scheduler 前 3 個排程免費 (NT$0) ＋ Resend/Brevo 免費層 (月免 3,000～9,000 封) | **NT$0** | 免費層內 **NT$0**<br>*(專業版約 NT$650)* |
+| **8. 🟢 選配 Artifact Analysis 映像檔掃描** | 掃網站容器映像檔的已知漏洞 | 自動掃描每份映像檔 US$0.26（約 NT$8.5，匯率是估的），開通後每次部署掃一次；沒開通時只有「立即掃描」那一次才收 | **NT$0**（開通後約 NT$169／月，以每月部署 20 次估） | 同左（依實際部署次數） |
 | **📊 每月預估總花費合計** | **整套系統總帳單** | **自動加總並與「每月預算提醒鈴（預設 NT$1,000）」比對** | **約 NT$495～620 / 月**<br>*(以推薦方案 3A 為例)* | **約 NT$570～910 / 月**<br>*(低於 NT$1,000 預算上限 ✅)* |
 
 ### 2. Cloud SQL 資料庫 6 種月租方案對照表
@@ -125,12 +128,13 @@ bash lazy-pack/gcp-setup-and-check.sh --item 3       # 只挑單一細項（例�
 bash lazy-pack/gcp-setup-and-check.sh --check-only   # 純唯讀體檢模式（只檢查與出報告，不修改設定）
 bash lazy-pack/gcp-setup-and-check.sh --project <Project ID>   # 直接指定 GCP 專案（不帶時會列出帳號下所有專案讓您選）
 
-# 於本機執行第三階段（原始碼金鑰掃描 ＋ 20 題 AI 推薦與防套話紅隊測試 ＋ 有網址時的網址預檢與 Observatory 評分）：
+# 於本機執行第三階段（原始碼金鑰掃描 ＋ 20 題 AI 推薦與防套話紅隊測試 ＋ 有網址時的網址預檢與 Observatory 評分 ＋ 容器映像檔漏洞掃描）：
 node lazy-pack/code-and-ai-audit.mjs --run-ai-eval                       # 不帶 --target：出「原始碼在哪裡」選單
 node lazy-pack/code-and-ai-audit.mjs --source github --repo "<GitHub 網址>" --run-ai-eval   # 跳過選單，直接指定來源（cloud／github／local）
 node lazy-pack/code-and-ai-audit.mjs --target "<藏家系統原始碼路徑>" --run-ai-eval         # 已知資料夾時
 node lazy-pack/code-and-ai-audit.mjs --eval-only --url "<Cloud Run 網址>"                  # 20 題直接打真實線上網站（只考題、不掃原始碼）
 node lazy-pack/code-and-ai-audit.mjs --web-check --url "<Cloud Run 網址>"    # 只跑 3-3 網址預檢＋3-4 Observatory（送出主機名稱前會先問；使用者已同意送出才加 --observatory）
+node lazy-pack/code-and-ai-audit.mjs --image-scan                         # 只跑 3-5 映像檔漏洞掃描（會花錢的開通與立即掃描要先問您；同意才加 --enable-image-scan、--scan-now）
 ```
 
 **補充說明：**

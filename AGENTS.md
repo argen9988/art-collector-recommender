@@ -16,6 +16,7 @@
   - 跨 AI 自動代操指南（`AGENT_SETUP_雲端資安設定與驗收指南.md`）：仿照 `ai-agent-ep04` 領航格式，供無資訊背景使用者將檔案或 GitHub 網址直接交給任何 AI Agent（Claude Code／ChatGPT App & Codex／Antigravity 2／Cursor／OpenCode）全程代操電腦完成三階段檢查、設定、費用精算與報告產出（見 D6）。
   - 雲端分階段設定、體檢與費用精算（`lazy-pack/gcp-setup-and-check.sh`）：Bash 腳本，支援 `--stage 1|2|cost|all` 與 `--item 1..8` 分階段或挑單一細項執行（不押特定日期）；不帶 `--project` 時列出帳號下所有 GCP 專案供選擇，並探測、記下藏家推薦系統的 Cloud Run 網址（`reports/.lazy-pack-state.env` 的 `SAVED_CLOUD_RUN_URL`）；每個細項執行前先展示「6 點白話說明卡」並允許自由選做或跳過；細項 1-3 將「每月預算金額」與「AI 每日呼叫上限」設計為帶數值影響說明之互動問答題（預設原值 1,000）；內建「💰 雲端服務開啟清單與每月費用精算器」；每次執行自動輸出「單次階段執行報告」並更新「全部執行累計總報告（`reports/full-execution-report.md`）」（見 D3、D4、D5、D6）。
   - 本機程式碼掃描與 AI 紅隊測試（`lazy-pack/code-and-ai-audit.mjs`）：Node.js ESM 腳本，讀取 `config/params.json`；不帶 `--target` 時不掃自己，出「原始碼在哪裡」選單（[A] 雲端 Cloud Build 原始碼／AI Studio 下載引導、[B] GitHub clone、[C] 搜尋本機下載與桌面的資料夾與 ZIP，`--source`、`--repo` 可跳過選單，抓下來的放 `reports/sources/`），`--target` 指到 Lazy Pack 自己、不存在或沒有程式碼檔時結束碼 2；支援細項自由選擇（`--scan-only`、`--eval-only`、`--run-ai-eval`），執行靜態金鑰掃描與 20 題 LLM-as-a-Judge 推薦品質/防注入/EDM 收件人隱私驗收；20 題的測試對象依序為 `--url`、狀態檔的 `SAVED_CLOUD_RUN_URL`、本機模擬回應（`--mock`、`--self-test` 一律模擬），線上端點的路徑與格式是假設的約定（預設 `POST /api/recommend`，`--api-path` 可改，要登入時用環境變數 `LAZY_PACK_API_TOKEN`，約定寫在腳本開頭註解），有網址時（`--web-check` 只跑這兩項、`--run-ai-eval` 全跑）再做 3-3 網址預檢（node 內建 fetch 與 tls 看 HSTS、Cookie 旗標、CORS、TLS 1.0／1.1、錯誤頁露出版本）與 3-4 MDN HTTP Observatory（只送主機名稱、掃描紀錄公開，要 `--observatory` 或在終端機回答 y 才送，管線的回答不算同意），結果照弱掃專案的共同格式寫進 `reports/findings.json`（D10、D11、D12；連不上網站時不改寫、也不送 Observatory，本機與內網網址不送 Observatory）；並自動輸出第三階段單次報告與更新全部執行累計總報告（見 D4、D6）。
+  - 3-5 Artifact Analysis 容器映像檔漏洞掃描（同一支 `code-and-ai-audit.mjs`，D9、D13）：`--image-scan` 只跑 3-5，`--run-ai-eval` 也跑；專案與網站取自狀態檔的 `SAVED_PROJECT_ID`、`SAVED_CLOUD_RUN_SERVICE`，從網站最新版本取映像檔 digest，要在 Artifact Registry 才掃；自動掃描（`containerscanning`）與立即掃描（`ondemandscanning`，`--scan-now`）兩種都做，開通（`--enable-image-scan`）與立即掃描都會花錢（一份映像檔 US$0.26），要帶旗標或在終端機回答 y，管線的回答不算同意；高、中風險而且已有修補版本的才讓第三階段不通過（類別代號 `IMG-VULN`、CWE-1395）；`--image-scan` 沒有結果時結束碼 2；`reports/findings.json` 依類別代號開頭分段換掉（`WEB-`、`OBS-`、`IMG-`）；開通狀態記在狀態檔 `SAVED_IMAGE_SCAN_ENABLED`，`gcp-setup-and-check.sh` 只讀、照原樣寫回，並把開通後的月費算進費用精算器第 8 項。
 
 ## 資料夾結構
 
@@ -31,7 +32,7 @@ art-collector-recommender/
 │   └── code-and-ai-audit.mjs            # 本機原始碼金鑰掃描、AI 推薦品質驗收、網址預檢與 Observatory 腳本
 ├── tests/
 │   ├── test-gcp-setup.sh                # gcp-setup-and-check.sh 自動測試（假 gcloud 走真實分支＋dry-run）
-│   ├── test-code-audit.sh               # code-and-ai-audit.mjs 自動測試（--target 防呆、三種原始碼來源、埋假金鑰的複本、--url 線上測試、3-3／3-4 網址檢查）
+│   ├── test-code-audit.sh               # code-and-ai-audit.mjs 自動測試（--target 防呆、三種原始碼來源、埋假金鑰的複本、--url 線上測試、3-3／3-4 網址檢查、3-5 映像檔掃描）
 │   ├── fake-recommend-api.mjs           # 假推薦 API、假網站與假 Observatory 小伺服器（網址第一段決定回對或回錯；給憑證時另開兩個 https）
 │   ├── fakebin/gcloud(.cmd)             # 假 gcloud：依參數回固定輸出並記下呼叫（.cmd 給 Windows 的 node 經 cmd.exe 叫）
 │   └── fixtures/fake-nextjs-app/        # 乾淨的假 Next.js 專案（--self-test 掃它；測試執行時才複製一份埋問題）
@@ -47,20 +48,20 @@ art-collector-recommender/
 
 ## 資料模型與參數定義
 
-- 所有可調門檻集中於 `config/params.json`（含 `"_說明"`），包含每月預算警示 `budget_monthly_ntd`（現在是 1000）、資料庫目標月租 `db_target_monthly_ntd`（現在是 550）、API 每日上限 `api_quota_rpd`（現在是 1000）、每分鐘上限 `api_quota_rpm`（現在是 30）、備份天數 `backup_retention_days`（現在是 14）、每日 EDM 發送上限 `edm_daily_send_limit`（現在是 100）、驗收題數 `eval_question_count`（現在是 20）、測試藏家預算上限 `eval_max_budget_ntd`（現在是 200000）、驗收合格門檻百分比 `eval_pass_threshold_pct`（現在是 100）、`--url` 線上測試每題等待秒數 `eval_request_timeout_sec`（現在是 30）。
+- 所有可調門檻集中於 `config/params.json`（含 `"_說明"`），包含每月預算警示 `budget_monthly_ntd`（現在是 1000）、資料庫目標月租 `db_target_monthly_ntd`（現在是 550）、API 每日上限 `api_quota_rpd`（現在是 1000）、每分鐘上限 `api_quota_rpm`（現在是 30）、備份天數 `backup_retention_days`（現在是 14）、每日 EDM 發送上限 `edm_daily_send_limit`（現在是 100）、驗收題數 `eval_question_count`（現在是 20）、測試藏家預算上限 `eval_max_budget_ntd`（現在是 200000）、驗收合格門檻百分比 `eval_pass_threshold_pct`（現在是 100）、`--url` 線上測試每題等待秒數 `eval_request_timeout_sec`（現在是 30）、3-5 每份映像檔掃描費用美元 `image_scan_usd_per_image`（現在是 0.26）、費用精算用的每月部署次數 `image_scan_deploys_per_month`（現在是 20）、美元兌新台幣匯率 `usd_twd_rate`（現在是 32.5，估的）。
 
 ## 業務規則精確定義
 
 1. **所有自動化檢查與設定皆須具備冪等性（Idempotency）與細項可選性**：執行任何變更前，先查詢現況；若該項設定已存在且符合安全標準，印出 `✅ 已存在，自動跳過`；尚未設定之細項先展示「6 點白話說明卡」，允許執行者逐項決定現在做或暫緩跳過。
 2. **Cloud SQL 規格採互動式選擇**：腳本不強制降級為最低規格，而是列出 6 種方案（含維持現況、NT$500–600/月 之 `db-g1-small` 搭配上下班自動啟停排程，或 `db-f1-micro` 加大儲存與 30 天 PITR 備份）供執行者討論決定。
-3. **雙軌報告與每月費用精算自動輸出**：每次執行任一階段，皆自動輸出單次報告 `reports/stage-<階段>-report-<時間>.md` 並更新累計總報告 `reports/full-execution-report.md`（內含 7 大雲端服務開啟狀態與每月費用精算表）。
+3. **雙軌報告與每月費用精算自動輸出**：每次執行任一階段，皆自動輸出單次報告 `reports/stage-<階段>-report-<時間>.md` 並更新累計總報告 `reports/full-execution-report.md`（內含 8 大雲端服務開啟狀態與每月費用精算表）。
 4. **前端零機密原則**：任何含 `AIza`、`postgres://` 或未加白名單之敏感變數，不得出現於前端 bundle 或 `NEXT_PUBLIC_` 變數中。
 
 ## 核心流程（分三階段推進，不押特定日期）
 
 1. **第一階段（立即止血與基礎防護）**：執行 `bash lazy-pack/gcp-setup-and-check.sh --stage 1` 檢查並導引完成 Paid Tier 綁定、雙 Owner 共管、互動問答設定每月預算與 API 每日上限、設定 OAuth 同仁 Gmail 白名單。
 2. **第二階段（系統架構加固與規格選型）**：執行 `bash lazy-pack/gcp-setup-and-check.sh --stage 2` 隔離金鑰至 Secret Manager、關閉 Cloud SQL 公網 IP／開啟 SSL 與每日備份、選定資料庫月租方案（含選配 Vertex AI 與排程 EDM），並自動產出每月費用精算表。
-3. **第三階段（上線前原始碼與 AI 總體檢）**：於本機執行 `node lazy-pack/code-and-ai-audit.mjs --run-ai-eval` 掃描程式碼並完成 AI 推薦精準度與防注入測試（有網站網址時打線上網站；現在是 20 題，見 `config/params.json` 的 `eval_question_count`），有網址時再做 3-3 網址預檢與 3-4 MDN Observatory，產出最終《全部階段執行累計總報告》。
+3. **第三階段（上線前原始碼與 AI 總體檢）**：於本機執行 `node lazy-pack/code-and-ai-audit.mjs --run-ai-eval` 掃描程式碼並完成 AI 推薦精準度與防注入測試（有網站網址時打線上網站；現在是 20 題，見 `config/params.json` 的 `eval_question_count`），有網址時再做 3-3 網址預檢與 3-4 MDN Observatory，並做 3-5 容器映像檔漏洞掃描（開通與立即掃描會花錢，要使用者同意），產出最終《全部階段執行累計總報告》。
 
 ## 開發時踩過的坑
 
@@ -78,5 +79,5 @@ art-collector-recommender/
 
 ## 改動後的驗證方式
 
-1. 修改 `lazy-pack/gcp-setup-and-check.sh` 後，用 Git Bash 的 `C:\Program Files\Git\bin\bash.exe -n lazy-pack/gcp-setup-and-check.sh` 驗證語法無誤，跑 `bash tests/test-gcp-setup.sh`（PATH 前面放假 gcloud，走真實分支、不連雲端；現在 109 項），並用 `--dry-run` 模式測試 `--stage 1`、`--stage 2`、`--stage cost` 與報告輸出。`--dry-run` 碰到 gcloud 的地方都換成寫死的假值，只驗得到選單與報告，不能取代前者。
-2. 修改 `lazy-pack/code-and-ai-audit.mjs` 或 `config/params.json` 後，執行 `node lazy-pack/code-and-ai-audit.mjs --self-test` 確認參數讀取、靜態掃描（掃 `tests/fixtures/fake-nextjs-app`）、模擬閱卷、3-3 的判斷規則與報告輸出皆通過，再跑 `bash tests/test-code-audit.sh`（假 gcloud、本機假 git repo、假 ZIP、假推薦 API 與假網站、假 Observatory 小伺服器，不連雲端、不打真的 Observatory；現在 318 項，約 3 分鐘）。手動跑 `--eval-only`、`--run-ai-eval` 前，先把 `reports/.lazy-pack-state.env` 備份並移開（裡面第一階段記下的真網址會被當成測試對象），或加 `--mock`；`tests/test-code-audit.sh` 自己會備份、移開（連同 `reports/findings.json`），結束或被中斷時還原。
+1. 修改 `lazy-pack/gcp-setup-and-check.sh` 後，用 Git Bash 的 `C:\Program Files\Git\bin\bash.exe -n lazy-pack/gcp-setup-and-check.sh` 驗證語法無誤，跑 `bash tests/test-gcp-setup.sh`（PATH 前面放假 gcloud，走真實分支、不連雲端；現在 137 項），並用 `--dry-run` 模式測試 `--stage 1`、`--stage 2`、`--stage cost` 與報告輸出。`--dry-run` 碰到 gcloud 的地方都換成寫死的假值，只驗得到選單與報告，不能取代前者。
+2. 修改 `lazy-pack/code-and-ai-audit.mjs` 或 `config/params.json` 後，執行 `node lazy-pack/code-and-ai-audit.mjs --self-test` 確認參數讀取、靜態掃描（掃 `tests/fixtures/fake-nextjs-app`）、模擬閱卷、3-3、3-5 的判斷規則與報告輸出皆通過，再跑 `bash tests/test-code-audit.sh`（假 gcloud、本機假 git repo、假 ZIP、假推薦 API 與假網站、假 Observatory 小伺服器，不連雲端、不打真的 Observatory；現在 379 項，這台實測約 1 分鐘）。手動跑 `--eval-only`、`--run-ai-eval` 前，先把 `reports/.lazy-pack-state.env` 備份並移開（裡面第一階段記下的真網址會被當成測試對象），或加 `--mock`；`tests/test-code-audit.sh` 自己會備份、移開（連同 `reports/findings.json`），結束或被中斷時還原。
