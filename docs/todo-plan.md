@@ -33,5 +33,5 @@
 
 - [ ] **【細項 3-1】執行本機原始碼金鑰 0 外洩掃描**：確認前端無硬編碼 API Key、資料庫密碼或 `NEXT_PUBLIC_` 機密變數外洩。
 - [ ] **【細項 3-2】執行 20 題 AI 推薦準確度與防惡意套話壓力測試**：以虛構假資料驗證推薦畫作 100% 符合預算與庫存、EDM 無 CC 外洩名單，並成功攔截 Prompt Injection 套話指令。
-- [ ] **【細項 3-5】Artifact Analysis 套件與映像檔漏洞掃描**（D9）：照細項的做法先查現況（API 有沒有開、映像檔是不是在 Artifact Registry），問過才開通；讀出掃描結果併進 findings。費用精算器加這一項（每次掃描 US$0.26，以每月部署 20 次估約 NT$170，匯率是估的）。只掃開通之後新推上去的映像檔。
+- [ ] **【細項 3-5】Artifact Analysis 套件與映像檔漏洞掃描**（D9、D13）：`code-and-ai-audit.mjs` 的 `--image-scan` 與假 gcloud 已做好（段 D2a）。還沒做：① `tests/test-code-audit.sh` 加第 11 段，用假 gcloud 測沒開通、`--enable-image-scan`、自動掃描有結果、`--scan-now`、不在 Artifact Registry、findings.json 分段換掉、管線的 y 不算同意、`--run-ai-eval` 沒專案時跳過；② `gcp-setup-and-check.sh` 的費用精算器加第 8 項（讀 `image_scan_*`、`usd_twd_rate`；它的 `read_json_int` 只讀整數，要另寫讀小數的）與 `tests/test-gcp-setup.sh`；③ README、AGENT_SETUP、AGENTS.md 跟著改，再審一輪（段 D2c）。真雲端驗收時核對 `images describe --show-package-vulnerability` 的輸出格式與修補版本欄位。
 - [ ] **產出《全部階段執行累計總報告》並正式導入上線**：彙整 `reports/full-execution-report.md`（含三階段成果與每月雲端費用精算表）回報資訊相關權責單位留存。

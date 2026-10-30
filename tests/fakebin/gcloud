@@ -4,7 +4,20 @@ echo "$*" >> "${FAKE_GCLOUD_LOG:-/dev/null}"
 args="$*"
 # FAKE_GCLOUD_FAIL=<片段>：參數含這段字的呼叫一律失敗（測「gcloud 失敗不計入已完成」）
 [ -n "${FAKE_GCLOUD_FAIL:-}" ] && [[ "$args" == *"$FAKE_GCLOUD_FAIL"* ]] && exit 1
+# 細項 3-5 用：FAKE_IMAGE_REF 換網站的映像檔、FAKE_AUTO_SCAN=1／FAKE_ON_DEMAND=1 當成已開通，
+# FAKE_IMAGE_DESCRIBE／FAKE_SCAN_VULNS 指到 JSON 檔當成自動掃描／立即掃描的結果（沒給就是沒有結果）
+IMG_REF="${FAKE_IMAGE_REF:-asia-east1-docker.pkg.dev/proj-a/cloud-run-source-deploy/art-web@sha256:$(printf 'a%.0s' {1..64})}"
 case "$args" in
+  "--version") echo "Google Cloud SDK 999.0.0 (fake)" ;;
+  "run services list"*"--project=proj-a"*"--format=json"*)
+    printf '[{"metadata":{"name":"admin-web","labels":{"cloud.googleapis.com/location":"asia-east1"}},"status":{"url":"https://admin-web-fake.a.run.app","latestReadyRevisionName":"admin-web-00001"}},'
+    printf '{"metadata":{"name":"art-web","labels":{"cloud.googleapis.com/location":"asia-east1"}},"status":{"url":"https://art-web-fake.a.run.app","latestReadyRevisionName":"art-web-00002"}}]\n' ;;
+  "run revisions describe art-web-00002"*"--region=asia-east1"*) printf '{"status":{"imageDigest":"%s"}}\n' "$IMG_REF" ;;
+  "artifacts docker images describe $IMG_REF --show-package-vulnerability"*)
+    if [ -n "${FAKE_IMAGE_DESCRIBE:-}" ]; then cat "$FAKE_IMAGE_DESCRIBE"; else echo '{"image_summary":{}}'; fi ;;
+  "artifacts docker images scan $IMG_REF --remote"*) echo "projects/proj-a/locations/asia/scans/fake-scan-1" ;;
+  "artifacts docker images list-vulnerabilities projects/proj-a/locations/asia/scans/fake-scan-1"*)
+    if [ -n "${FAKE_SCAN_VULNS:-}" ]; then cat "$FAKE_SCAN_VULNS"; else echo '[]'; fi ;;
   "config get-value project"*) echo "${FAKE_DEFAULT_PROJECT:-(unset)}" ;;
   "projects list"*)
     [ "${FAKE_NO_PROJECTS:-0}" = "1" ] && exit 0
@@ -15,7 +28,11 @@ case "$args" in
   # FAKE_VERTEX_ROLE：1＝回 roles/aiplatform.user，其他非 0 的值原樣當成服務帳戶的角色（例如 roles/editor）
   "projects get-iam-policy"*)
     case "${FAKE_VERTEX_ROLE:-0}" in 0) : ;; 1) echo "roles/aiplatform.user" ;; *) echo "$FAKE_VERTEX_ROLE" ;; esac ;;
-  "services list"*"--project=proj-a"*) echo "run.googleapis.com" ;;
+  "services list"*"--project=proj-a"*)
+    echo "run.googleapis.com"
+    [ "${FAKE_AUTO_SCAN:-0}" = "1" ] && echo "containerscanning.googleapis.com"
+    [ "${FAKE_ON_DEMAND:-0}" = "1" ] && echo "ondemandscanning.googleapis.com"
+    : ;;
   "services list"*"--project=proj-c"*) echo "run.googleapis.com" ;;
   "run services list"*"--project=proj-a"*)
     printf "art-web\thttps://art-web-fake.a.run.app\nadmin-web\thttps://admin-web-fake.a.run.app\n" ;;

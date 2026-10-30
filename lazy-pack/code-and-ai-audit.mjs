@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
  * 藏家推薦系統 (art-collector-recommender)
- * 第三階段：本機原始碼金鑰外洩掃描 ＋ 20 題 AI 推薦與防注入紅隊測試 ＋ 網址預檢與 MDN Observatory 腳本 (code-and-ai-audit.mjs)
+ * 第三階段：本機原始碼金鑰外洩掃描 ＋ 20 題 AI 推薦與防注入紅隊測試 ＋ 網址預檢與 MDN Observatory ＋ 映像檔漏洞掃描腳本 (code-and-ai-audit.mjs)
  *
  * 核心原則：
  * 1. 開場提供「白話互動口令參考」與每個細項的「6 點白話詳盡說明卡」（做什麼、為什麼做、好處、費用與安全性）。
- * 2. 支援細項自由選擇（可只跑 3-1 原始碼金鑰掃描、只跑 3-2 AI 20 題測試、只跑 3-3／3-4 網址檢查，或全跑）。
+ * 2. 支援細項自由選擇（可只跑 3-1 原始碼金鑰掃描、只跑 3-2 AI 20 題測試、只跑 3-3／3-4 網址檢查、只跑 3-5 映像檔掃描，或全跑）。
  * 3. 從 ../config/params.json 讀取可調門檻（遵循 automation.md 規範）。
  * 4. 所有檢查項目「先檢查現況」，已符合安全標準者自動標記「✅ 已符合，自動跳過」。
  * 5. AI 品質（以人推畫 / 以畫推人 EDM）與紅隊測試 100% 採用虛構藏家與畫作假資料（Dummy Data）。
@@ -20,14 +20,22 @@
  *   node lazy-pack/code-and-ai-audit.mjs --source cloud|github|local [--repo "<GitHub 網址>"]  # 不出選單，直接指定來源
  *   node lazy-pack/code-and-ai-audit.mjs --eval-only --url "<Cloud Run 網址>" [--api-path /api/recommend]  # 20 題打真實線上網站
  *   node lazy-pack/code-and-ai-audit.mjs --web-check --url "<Cloud Run 網址>" [--observatory]            # 只跑 3-3 網址預檢＋3-4 MDN Observatory
+ *   node lazy-pack/code-and-ai-audit.mjs --image-scan [--enable-image-scan] [--scan-now]                 # 只跑 3-5 Artifact Analysis 映像檔漏洞掃描
  *
  * 細項 3-3／3-4（--web-check 或 --run-ai-eval 時跑；網址的取得順序同 3-2；--mock、--self-test 不連網）：
  *   3-3 用 node 內建的 fetch 與 tls 看 HSTS、Cookie 的 Secure／HttpOnly、CORS、TLS 1.0／1.1、錯誤頁有沒有露出版本
  *   3-4 只把主機名稱送給 MDN HTTP Observatory（不需金鑰；掃描紀錄任何人都查得到，所以要 --observatory 或在終端機回答 y 才送；
  *       不是終端機時不問、管線的回答不算同意；本機與內網的主機名稱、連不上的網站一律不送）
  *   --web-check 沒有網址時結束碼 2；3-3 高、中風險與 3-4 評分 D、F 讓第三階段不通過，3-4 拿不到結果不擋
- *   結果寫進 reports/findings.json（每筆欄位照 vulnerability-scan-summary 規格第 8 節，版本見 FINDINGS_SCHEMA_VERSION；連不上網站時不改寫）
+ *   結果寫進 reports/findings.json（每筆欄位照 vulnerability-scan-summary 規格第 8 節，版本見 FINDINGS_SCHEMA_VERSION；連不上網站時不改寫 3-3、3-4 的部分，3-5 的部分保留）
  *   測試時用環境變數 LAZY_PACK_OBSERVATORY_API 換掉 Observatory 的網址（指到假伺服器），LAZY_PACK_OBSERVATORY_ALLOW_LOCAL=1 讓本機網址也送（假伺服器在本機）
+ *
+ * 細項 3-5（--image-scan 或 --run-ai-eval 時跑；--mock 不連雲端，--self-test 只驗判斷規則）：
+ *   照狀態檔的 SAVED_PROJECT_ID、SAVED_CLOUD_RUN_SERVICE 找網站現在跑的映像檔（要在 Artifact Registry），用 gcloud 讀 Artifact Analysis 的結果
+ *   自動掃描（containerscanning）只掃開通後新推的映像檔；沒有結果時可立即掃描（ondemandscanning，gcloud artifacts docker images scan --remote）
+ *   開通與立即掃描都會花錢（見 config/params.json 的 image_scan_*）：要 --enable-image-scan／--scan-now 或在終端機回答 y，管線的回答不算同意
+ *   高、中風險而且已有修補版本的讓第三階段不通過；沒有修補版本的照樣寫進 findings.json（IMG-VULN），不擋上線
+ *   --image-scan 這次沒有掃描結果時結束碼 2；--run-ai-eval 沒有結果時只在報告註明
  *
  * 細項 3-2 的測試對象（--self-test 一律本機模擬）：
  *   --url 帶的網址 → 沒帶就用第一階段記下的 SAVED_CLOUD_RUN_URL → 都沒有（或帶 --mock）就用本機模擬回應
@@ -75,6 +83,9 @@ const DEFAULTS = {
   eval_max_budget_ntd: 200000,
   eval_pass_threshold_pct: 100,
   eval_request_timeout_sec: 30,
+  image_scan_usd_per_image: 0.26,
+  image_scan_deploys_per_month: 20,
+  usd_twd_rate: 32.5,
 };
 
 const RANGES = {
@@ -88,6 +99,9 @@ const RANGES = {
   eval_max_budget_ntd: [10000, 10000000],
   eval_pass_threshold_pct: [80, 100],
   eval_request_timeout_sec: [5, 300],
+  image_scan_usd_per_image: [0, 10],
+  image_scan_deploys_per_month: [1, 1000],
+  usd_twd_rate: [20, 50],
 };
 
 function loadParams() {
@@ -726,30 +740,254 @@ async function runObservatory(params, site, consent, siteUnreachable) {
   return { passed, status, findings };
 }
 
-// 3-3＋3-4 一起跑，結果寫進 reports/findings.json；沒有網址、連不上網站時不動舊的 findings.json
+// 3-3＋3-4 一起跑；findingsPart 是要寫進 reports/findings.json 的部分（沒有網址、連不上網站時是 null，不動舊的那部分）
 async function runWebStage(params, site, skipWhy, obsConsent) {
   if (!site) {
     const s = `⏭️ 未執行（${skipWhy}）`;
     console.log(`\n⏭️ 細項 3-3、3-4 未執行：${skipWhy}`);
-    return { passed: true, status33: s, status34: s, findings: [], findingsFile: null };
+    return { passed: true, status33: s, status34: s, findings: [], findingsPart: null };
   }
   const r3 = await runWebCheck(params, site);
   const r4 = await runObservatory(params, site, obsConsent, r3.unreachable);
   const findings = [...r3.findings, ...r4.findings];
-  let findingsFile = null;
-  if (r3.unreachable) {
-    // 空的 findings.json 會被當成「沒有弱點」，連不上時保留舊檔
-    console.log('⚠️ 連不上網站，reports/findings.json 不改寫（這次沒有檢查結果，不代表沒有弱點）');
+  // 空的 findings.json 會被當成「沒有弱點」，連不上時保留舊的結果
+  if (r3.unreachable) console.log('⚠️ 連不上網站，reports/findings.json 不改寫 3-3、3-4 的部分（這次沒有檢查結果，不代表沒有弱點）');
+  const findingsPart = r3.unreachable ? null : { prefixes: ['WEB-', 'OBS-'], findings };
+  return { passed: r3.passed && r4.passed, status33: r3.status, status34: r4.status, findings, findingsPart };
+}
+
+// 這次真的拿到結果的細項，換掉 reports/findings.json 裡同類別代號開頭的舊結果，其他細項的舊結果保留；
+// 寫不進去時只警告、不中斷。回傳寫好的檔案位置，沒寫就是 null
+function writeFindings(parts) {
+  const got = parts.filter(Boolean);
+  if (!got.length) return null;
+  let old = [];
+  try {
+    const raw = JSON.parse(fs.readFileSync(FINDINGS_FILE, 'utf-8'));
+    if (Array.isArray(raw)) old = raw;
+  } catch { /* 沒有舊檔或看不懂：當成空的 */ }
+  const prefixes = got.flatMap((p) => p.prefixes);
+  const kept = old.filter((f) => !prefixes.some((p) => String(f && f.category).startsWith(p)));
+  try {
+    fs.mkdirSync(REPORTS_DIR, { recursive: true });
+    fs.writeFileSync(FINDINGS_FILE, JSON.stringify([...kept, ...got.flatMap((p) => p.findings)], null, 2) + '\n', 'utf-8');
+    return FINDINGS_FILE;
+  } catch (err) {
+    console.log(`⚠️ 寫不進 ${FINDINGS_FILE}（${err.code || err.message}），結果只留在畫面與報告裡`);
+    return null;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// 3c. 細項 3-5 Artifact Analysis 映像檔漏洞掃描（gcloud；開通與立即掃描會花錢，要 --enable-image-scan／--scan-now 或在終端機回答 y）
+// -----------------------------------------------------------------------------
+// 掃描結果的 JSON 格式照官方文件的 Grafeas 範例（vulnerability.effectiveSeverity、packageIssue、noteName）；
+// `images describe --show-package-vulnerability` 的外層結構文件沒寫，所以整份走一遍找 kind 是 VULNERABILITY／DISCOVERY 的物件。
+// 修補版本的欄位（fixAvailable、fixedVersion.kind=NORMAL）是照 Grafeas 的定義，還沒拿真的掃描結果核對（真雲端驗收時確認）
+const SRC_ARTIFACT = 'Artifact Analysis';
+const API_AUTO_SCAN = 'containerscanning.googleapis.com';
+const API_ON_DEMAND = 'ondemandscanning.googleapis.com';
+const IMG_SEVERITY = { CRITICAL: '高', HIGH: '高', MEDIUM: '中', LOW: '低' }; // 其他（MINIMAL、沒標）＝資訊
+const IMG_CWE = 'CWE-1395'; // Dependency on Vulnerable Third-Party Component
+const ON_DEMAND_TIMEOUT_MS = 20 * 60 * 1000;
+
+function gcloudJson(cmdArgs, opts = {}) {
+  const r = runCmd('gcloud', [...cmdArgs, '--format=json'], opts);
+  if (!r.ok) return { ok: false, err: (r.stderr.split(/\r?\n/).find((l) => l.trim()) || 'gcloud 執行失敗').slice(0, 200) };
+  try {
+    return { ok: true, data: JSON.parse(r.stdout || 'null') };
+  } catch {
+    return { ok: false, err: 'gcloud 的輸出看不懂（不是 JSON）' };
+  }
+}
+
+// 把整份 JSON 走一遍：收集弱點（同一筆出現好幾次只留一次）與掃描狀態（DISCOVERY 的 analysisStatus）
+function collectOccurrences(data) {
+  const vulns = new Map();
+  let discovery = null;
+  const walk = (x) => {
+    if (Array.isArray(x)) { x.forEach(walk); return; }
+    if (!x || typeof x !== 'object') return;
+    if (x.kind === 'VULNERABILITY' && x.vulnerability) {
+      const key = x.name || `${x.noteName}|${JSON.stringify(x.vulnerability.packageIssue || [])}`;
+      vulns.set(key, x);
+      return;
+    }
+    if (x.kind === 'DISCOVERY' && x.discovery) {
+      discovery = String(x.discovery.analysisStatus || '');
+      return;
+    }
+    Object.values(x).forEach(walk);
+  };
+  walk(data);
+  return { occs: [...vulns.values()], discovery };
+}
+
+// 同一個 CVE 合成一筆（風險取高的、套件列在一起）；blocking＝高、中風險而且已經有修補版本（讓第三階段不通過）
+function imageFindings(imageRef, occs) {
+  const byId = new Map();
+  for (const o of occs) {
+    const v = o.vulnerability || {};
+    const id = String(o.noteName || '').split('/').pop() || '（沒有編號）';
+    const sev = IMG_SEVERITY[String(v.effectiveSeverity || v.severity || '').toUpperCase()] || '資訊';
+    const issues = Array.isArray(v.packageIssue) ? v.packageIssue : [];
+    const fix = v.fixAvailable === true || issues.some((p) => p.fixAvailable === true
+      || [p.fixedVersion, p.fixedLocation && p.fixedLocation.version].some((ver) => ver && ver.kind === 'NORMAL'));
+    const cur = byId.get(id) || { id, sev, fix: false, pkgs: new Set() };
+    if (SEVERITY_ORDER.indexOf(sev) < SEVERITY_ORDER.indexOf(cur.sev)) cur.sev = sev;
+    cur.fix = cur.fix || fix;
+    for (const p of issues) {
+      const name = p.affectedPackage || (p.affectedLocation && p.affectedLocation.package);
+      if (name) cur.pkgs.add(String(name));
+    }
+    byId.set(id, cur);
+  }
+  const list = [...byId.values()].sort((a, b) => SEVERITY_ORDER.indexOf(a.sev) - SEVERITY_ORDER.indexOf(b.sev) || Number(b.fix) - Number(a.fix) || a.id.localeCompare(b.id));
+  const findings = list.map((c) => makeFinding('IMG-VULN', IMG_CWE, imageRef, c.sev, SRC_ARTIFACT,
+    `${c.id}（套件：${[...c.pkgs].join('、') || '未列出'}）${c.fix ? '：已有修補版本，更新基礎映像檔或套件後重新部署' : '：目前沒有修補版本，先記著，上游發布修補後重建映像檔'}`));
+  const blocking = list.filter((c) => c.fix && (c.sev === '高' || c.sev === '中')).length;
+  return { findings, blocking };
+}
+
+// 映像檔要在 Artifact Registry（<地區>-docker.pkg.dev/<專案>/<存放區>/<映像檔>@sha256:…）才掃得到
+function parseImageRef(ref) {
+  const m = String(ref || '').match(/^([a-z0-9-]+)-docker\.pkg\.dev\/[^/@]+\/[^/@]+\/[^@]+@sha256:[0-9a-f]{64}$/);
+  if (!m) return null;
+  const region = m[1];
+  // 立即掃描的資料處理地點只有 us、europe、asia 三種
+  const location = region.startsWith('europe') ? 'europe' : region.startsWith('asia') || region.startsWith('australia') ? 'asia' : 'us';
+  return { ref, region, location };
+}
+
+// 找出藏家推薦系統的 Cloud Run 現在跑的映像檔（含 digest）；回傳 { ok, ref, service, why }
+function findDeployedImage(project, state) {
+  const list = gcloudJson(['run', 'services', 'list', `--project=${project}`, '--platform=managed']);
+  if (!list.ok) return { ok: false, why: `查不到 Cloud Run 網站（${list.err}）` };
+  const items = Array.isArray(list.data) ? list.data : [];
+  const name = (s) => (s && s.metadata && s.metadata.name) || '';
+  const want = state.SAVED_CLOUD_RUN_SERVICE ? String(state.SAVED_CLOUD_RUN_SERVICE) : '';
+  const url = state.SAVED_CLOUD_RUN_URL ? String(state.SAVED_CLOUD_RUN_URL) : '';
+  const svc = items.find((s) => want && name(s) === want)
+    || items.find((s) => url && s.status && s.status.url === url)
+    || (items.length === 1 ? items[0] : null);
+  if (!svc) {
+    return { ok: false, why: items.length ? `專案裡有 ${items.length} 個網站，不知道是哪一個（先跑 bash lazy-pack/gcp-setup-and-check.sh --stage cost --check-only 選好網站）` : '專案裡沒有 Cloud Run 網站' };
+  }
+  const region = (svc.metadata.labels && svc.metadata.labels['cloud.googleapis.com/location']) || '';
+  const rev = svc.status && svc.status.latestReadyRevisionName;
+  let ref = '';
+  if (rev && region) {
+    const d = gcloudJson(['run', 'revisions', 'describe', rev, `--project=${project}`, `--region=${region}`]);
+    if (d.ok && d.data && d.data.status) ref = d.data.status.imageDigest || '';
+  }
+  if (!ref) {
+    const c = svc.spec && svc.spec.template && svc.spec.template.spec && svc.spec.template.spec.containers;
+    ref = (Array.isArray(c) && c[0] && c[0].image) || '';
+  }
+  if (!ref) return { ok: false, why: `查不到網站 ${name(svc)} 用的映像檔` };
+  return { ok: true, ref, service: name(svc) };
+}
+
+// 終端機上問 y/N；不是終端機時一律當沒同意（會花錢，管線的回答不算）
+async function askPaid(question) {
+  return process.stdin.isTTY && /^y(es)?$/i.test(await ask(question));
+}
+
+// 回傳 { passed, hasResult, status, findings, findingsPart, autoEnabled }；autoEnabled 是 true／false，查不到是 null
+async function runImageScan(params, state, cliArgs) {
+  const perScanNtd = Math.round(params.image_scan_usd_per_image * params.usd_twd_rate);
+  const monthlyNtd = Math.round(params.image_scan_usd_per_image * params.image_scan_deploys_per_month * params.usd_twd_rate);
+  console.log('\n------------------------------------------------------------------------------');
+  console.log('📦 [細項 3-5] Artifact Analysis 映像檔漏洞掃描（Google 的套件與作業系統弱點掃描）');
+  console.log('   📖 【白話說明卡】：');
+  console.log('   • 🎯 這是做什麼：請 Google 檢查網站的「映像檔」（打包好的程式與作業系統）裡，有沒有已知弱點的套件。');
+  console.log('   • ⚠️ 為什麼要做：3-1～3-4 看不到網站用了哪些套件；舊套件的公開弱點是常見的入侵管道。');
+  console.log('   • ✨ 好處：結果寫進 reports/findings.json；已經有修補版本的高、中風險會讓第三階段不通過，沒有修補版本的只記著、不擋上線。');
+  console.log(`   • 💰 費用：開通自動掃描後，每次部署新版掃一次 US$${params.image_scan_usd_per_image}（以每月部署 ${params.image_scan_deploys_per_month} 次估約 NT$${monthlyNtd}／月，匯率是估的）；`);
+  console.log(`       立即掃描現在上線的版本，一次 US$${params.image_scan_usd_per_image}（約 NT$${perScanNtd}），要另外開通 On-Demand Scanning。`);
+  console.log('   • 🔒 安全性：映像檔不離開 Google Cloud；只查設定與結果，開通與立即掃描都會先問。');
+  console.log('   • ⏭️ 只掃開通之後新推上去的映像檔：開通前就上線的版本，要等下次部署，或選「立即掃描」。');
+  console.log('------------------------------------------------------------------------------');
+  const skip = (why, autoEnabled = null) => {
+    console.log(`⏭️ 細項 3-5 未執行：${why}`);
+    return { passed: true, hasResult: false, status: `⏭️ 未執行（${why}）`, findings: [], findingsPart: null, autoEnabled };
+  };
+  const project = state.SAVED_PROJECT_ID ? String(state.SAVED_PROJECT_ID) : '';
+  if (!project) return skip('還不知道是哪個 GCP 專案；先跑 bash lazy-pack/gcp-setup-and-check.sh --stage cost --check-only 選好專案（不改任何設定）');
+  if (!runCmd('gcloud', ['--version']).ok) return skip('這台電腦沒有 gcloud（或叫不起來），先照 README 裝好 Google Cloud CLI 並登入');
+
+  const img = findDeployedImage(project, state);
+  if (!img.ok) return skip(img.why);
+  const parsed = parseImageRef(img.ref);
+  if (!parsed) return skip(`網站 ${img.service} 的映像檔 ${img.ref} 不在 Artifact Registry（或沒有 digest），Artifact Analysis 掃不了`);
+  console.log(`   📦 網站 ${img.service} 現在跑的映像檔：${img.ref}`);
+
+  const svcs = runCmd('gcloud', ['services', 'list', '--enabled', `--project=${project}`, '--format=value(config.name)']);
+  if (!svcs.ok) return skip('查不到專案開了哪些 API（權限不夠或沒登入）');
+  const enabled = new Set(svcs.stdout.split(/\r?\n/).map((l) => l.trim()));
+  let autoEnabled = enabled.has(API_AUTO_SCAN);
+  const notTty = !process.stdin.isTTY;
+  if (notTty && !cliArgs.includes('--enable-image-scan') && !cliArgs.includes('--scan-now')) {
+    console.log('ℹ️ 不是在終端機執行：開通自動掃描與立即掃描會花錢，只認 --enable-image-scan、--scan-now，管線的回答不算同意');
+  }
+
+  const done = (occs, how) => {
+    const { findings, blocking } = imageFindings(img.ref, occs);
+    const high = findings.filter((f) => f.severity === '高' || f.severity === '中').length;
+    const status = blocking
+      ? `❌ 未通過（${how}：${findings.length} 個弱點，其中 ${blocking} 個高、中風險已有修補版本）`
+      : `✅ 通過（${how}：${findings.length} 個弱點${high ? `，其中 ${high} 個高、中風險還沒有修補版本` : '，沒有高、中風險'}）`;
+    console.log(`${blocking ? '❌' : '✅'} 3-5 ${status.slice(2)}`);
+    return { passed: !blocking, hasResult: true, status, findings, findingsPart: { prefixes: ['IMG-'], findings }, autoEnabled };
+  };
+
+  let pendingWhy = '';
+  if (autoEnabled) {
+    const d = gcloudJson(['artifacts', 'docker', 'images', 'describe', img.ref, '--show-package-vulnerability']);
+    if (!d.ok) return skip(`讀不到掃描結果（${d.err}）`, true);
+    const { occs, discovery } = collectOccurrences(d.data);
+    if (occs.length || discovery === 'FINISHED_SUCCESS') return done(occs, '自動掃描');
+    pendingWhy = discovery === 'PENDING' || discovery === 'SCANNING'
+      ? '自動掃描還在跑，過幾分鐘再跑一次 3-5'
+      : discovery === 'FINISHED_UNSUPPORTED'
+        ? 'Artifact Analysis 不支援這份映像檔的作業系統'
+        : '這份映像檔還沒有自動掃描的結果，可能是開通之前推上去的，下次部署後才會有';
+    console.log(`ℹ️ ${pendingWhy}`);
   } else {
-    try {
-      fs.mkdirSync(REPORTS_DIR, { recursive: true });
-      fs.writeFileSync(FINDINGS_FILE, JSON.stringify(findings, null, 2) + '\n', 'utf-8');
-      findingsFile = FINDINGS_FILE;
-    } catch (err) {
-      console.log(`⚠️ 寫不進 ${FINDINGS_FILE}（${err.code || err.message}），結果只留在畫面與報告裡`);
+    console.log(`ℹ️ 專案還沒開通自動掃描（${API_AUTO_SCAN}）`);
+    const yes = cliArgs.includes('--enable-image-scan')
+      || await askPaid(`\n💰 要開通自動掃描嗎？之後每次部署新版掃一次 US$${params.image_scan_usd_per_image}（每月部署 ${params.image_scan_deploys_per_month} 次約 NT$${monthlyNtd}）。(y/N，直接按 Enter 就不開通) `);
+    if (yes) {
+      const en = runCmd('gcloud', ['services', 'enable', API_AUTO_SCAN, `--project=${project}`]);
+      if (en.ok) {
+        autoEnabled = true;
+        pendingWhy = '剛開通自動掃描，現在上線的版本要等下次部署才會被掃';
+        console.log(`✅ 已開通自動掃描。${pendingWhy}`);
+      } else {
+        console.log(`❌ 開通失敗（${en.stderr.split(/\r?\n/)[0] || '沒有錯誤訊息'}），專案維持原狀`);
+        pendingWhy = '開通自動掃描失敗';
+      }
+    } else {
+      pendingWhy = '沒有開通自動掃描，要開通請加 --enable-image-scan 或在終端機回答 y';
     }
   }
-  return { passed: r3.passed && r4.passed, status33: r3.status, status34: r4.status, findings, findingsFile };
+
+  // 自動掃描沒有結果：問要不要立即掃描現在上線的版本
+  const now = cliArgs.includes('--scan-now')
+    || await askPaid(`\n💰 要立即掃描現在上線的版本嗎？一次 US$${params.image_scan_usd_per_image}（約 NT$${perScanNtd}），${enabled.has(API_ON_DEMAND) ? '' : `要先開通 ${API_ON_DEMAND}，`}要等幾分鐘。(y/N，直接按 Enter 就跳過) `);
+  if (!now) return skip(`${pendingWhy}；要立即掃描請加 --scan-now`, autoEnabled);
+  if (!enabled.has(API_ON_DEMAND)) {
+    const en = runCmd('gcloud', ['services', 'enable', API_ON_DEMAND, `--project=${project}`]);
+    if (!en.ok) return skip(`開通 ${API_ON_DEMAND} 失敗（${en.stderr.split(/\r?\n/)[0] || '沒有錯誤訊息'}）`, autoEnabled);
+    console.log(`✅ 已開通 ${API_ON_DEMAND}（只有掃描時收費）`);
+  }
+  console.log(`⏳ 立即掃描中（資料處理地點 ${parsed.location}），通常要幾分鐘…`);
+  const scan = runCmd('gcloud', ['artifacts', 'docker', 'images', 'scan', img.ref, '--remote', `--location=${parsed.location}`, `--project=${project}`, '--format=value(response.scan)'], { timeout: ON_DEMAND_TIMEOUT_MS });
+  const scanName = scan.ok ? scan.stdout.split(/\r?\n/).filter(Boolean).pop() : '';
+  if (!scanName) return skip(`立即掃描失敗（${scan.stderr.split(/\r?\n/)[0] || '逾時或沒有回傳掃描名稱'}）`, autoEnabled);
+  const v = gcloudJson(['artifacts', 'docker', 'images', 'list-vulnerabilities', scanName, `--project=${project}`]);
+  if (!v.ok) return skip(`讀不到立即掃描的結果（${v.err}）`, autoEnabled);
+  return done(collectOccurrences(v.data).occs, '立即掃描');
 }
 
 // -----------------------------------------------------------------------------
@@ -786,7 +1024,7 @@ function parseEnvState(filePath) {
   return state;
 }
 
-function writeReports(params, runScan, runEval, codeResult, aiResult, targetDir, evalTarget, web) {
+function writeReports(params, runScan, runEval, codeResult, aiResult, targetDir, evalTarget, web, image, findingsFile) {
   fs.mkdirSync(REPORTS_DIR, { recursive: true });
   const now = new Date();
   const pad = (n) => String(n).padStart(2, '0');
@@ -799,15 +1037,19 @@ function writeReports(params, runScan, runEval, codeResult, aiResult, targetDir,
   const dbMin = Number(state.SAVED_DB_MIN_NTD || 480);
   const dbMax = Number(state.SAVED_DB_MAX_NTD || 560);
   const edmMax = Number(state.SAVED_EDM_MAX_NTD || 0);
+  // 3-5 查得到開通狀態時記下來，累計總報告的費用精算照它算（查不到就沿用上次記下的）
+  if (image && image.autoEnabled !== null) state.SAVED_IMAGE_SCAN_ENABLED = image.autoEnabled ? 1 : 0;
+  const imageScanOn = Number(state.SAVED_IMAGE_SCAN_ENABLED || 0) === 1;
+  const imageNtd = imageScanOn ? Math.round(params.image_scan_usd_per_image * params.image_scan_deploys_per_month * params.usd_twd_rate) : 0;
 
   const aiNormalMin = 15;
   const aiNormalMax = 60;
   const aiCapMin = Math.max(30, Math.floor((quotaRpd * 30 * 3) / 1000));
   const aiCapMax = Math.max(90, Math.floor((quotaRpd * 30 * 10) / 1000));
-  const totalNormalMin = dbMin + aiNormalMin;
-  const totalNormalMax = dbMax + aiNormalMax;
-  const totalCapMin = dbMin + aiCapMin + edmMax;
-  const totalCapMax = dbMax + aiCapMax + edmMax;
+  const totalNormalMin = dbMin + aiNormalMin + imageNtd;
+  const totalNormalMax = dbMax + aiNormalMax + imageNtd;
+  const totalCapMin = dbMin + aiCapMin + edmMax + imageNtd;
+  const totalCapMax = dbMax + aiCapMax + edmMax + imageNtd;
 
   const scanStatus = !runScan
     ? '⏭️ 本次未選跑'
@@ -826,7 +1068,8 @@ function writeReports(params, runScan, runEval, codeResult, aiResult, targetDir,
 
   state.STAGE3_LAST_RUN = humanTime;
   state.STAGE3_SUMMARY = `3-1 程式碼掃描：${scanStatus} ｜ 3-2 AI 紅隊測試：${evalStatus}${runEval ? `（${evalTargetLabel}）` : ''}`
-    + (web ? ` ｜ 3-3 網址預檢：${web.status33} ｜ 3-4 Observatory：${web.status34}` : '');
+    + (web ? ` ｜ 3-3 網址預檢：${web.status33} ｜ 3-4 Observatory：${web.status34}` : '')
+    + (image ? ` ｜ 3-5 映像檔掃描：${image.status}` : '');
 
   Object.assign(state, {
     SAVED_DB_MIN_NTD: dbMin,
@@ -855,7 +1098,8 @@ function writeReports(params, runScan, runEval, codeResult, aiResult, targetDir,
     ...(runEval ? [`- **3-2 測試對象**：${evalTargetLabel}`] : []),
     `- **細項 3-3（網址預檢）**：${web ? web.status33 : '⏭️ 本次未選跑'}`,
     `- **細項 3-4（MDN HTTP Observatory）**：${web ? web.status34 : '⏭️ 本次未選跑'}`,
-    ...(web && web.findingsFile ? [`- **檢測結果（給弱掃合併用）**：${web.findingsFile}`] : []),
+    `- **細項 3-5（Artifact Analysis 映像檔漏洞掃描）**：${image ? image.status : '⏭️ 本次未選跑'}`,
+    ...(findingsFile ? [`- **檢測結果（給弱掃合併用）**：${findingsFile}`] : []),
     '',
     '## 一、 本次執行細項成果清單',
     '',
@@ -865,6 +1109,7 @@ function writeReports(params, runScan, runEval, codeResult, aiResult, targetDir,
     `| 細項 3-2 | ${params.eval_question_count} 題 AI 推薦預算邊界、零幻覺、防 CC 外洩與防 Prompt Injection 測試 | ${evalStatus} |`,
     `| 細項 3-3 | 網址預檢：HSTS、Cookie 旗標、CORS、舊版 TLS、錯誤頁露出版本 | ${web ? web.status33 : '⏭️ 本次未選跑'} |`,
     `| 細項 3-4 | MDN HTTP Observatory 安全標頭評分 | ${web ? web.status34 : '⏭️ 本次未選跑'} |`,
+    `| 細項 3-5 | Artifact Analysis 映像檔套件與作業系統漏洞掃描 | ${image ? image.status : '⏭️ 本次未選跑'} |`,
     '',
     ...(web && web.findings.length ? [
       '## 二、 網址檢查發現的問題（高、中＝必要修復，會讓第三階段不通過；低＝建議修復；資訊＝參考）',
@@ -872,6 +1117,14 @@ function writeReports(params, runScan, runEval, codeResult, aiResult, targetDir,
       '| 風險等級 | 處置原則 | 弱點類別 | CWE | 檢測來源 | 說明 |',
       '| :---: | :--- | :--- | :--- | :--- | :--- |',
       ...web.findings.map((f) => `| ${f.severity} | ${f.disposition} | ${f.category} | ${f.cwe} | ${f.sources.join('＋')} | ${f.description.replace(/\|/g, '\\|')} |`),
+      '',
+    ] : []),
+    ...(image && image.findings.length ? [
+      `## ${web && web.findings.length ? '三' : '二'}、 映像檔漏洞（${image.findings[0].target}；高、中風險已有修補版本的會讓第三階段不通過，還沒有修補版本的只記著）`,
+      '',
+      '| 風險等級 | 處置原則 | 弱點編號、套件與修補 |',
+      '| :---: | :--- | :--- |',
+      ...image.findings.map((f) => `| ${f.severity} | ${f.disposition} | ${f.description.replace(/\|/g, '\\|')} |`),
       '',
     ] : []),
   ].join('\n');
@@ -896,7 +1149,7 @@ function writeReports(params, runScan, runEval, codeResult, aiResult, targetDir,
     '| :--- | :--- | :---: | :--- |',
     `| **第一階段：立即止血與基礎防護** | 1-1 切換 Paid Tier 零訓練保障<br>1-2 雙 Owner 帳號共管<br>1-3 預算提醒、API 硬上限與 Gmail 白名單 | ${state.STAGE1_LAST_RUN} | ${state.STAGE1_SUMMARY} |`,
     `| **第二階段：系統架構加固與規格選型** | 2-1 Secret Manager 金鑰隔離<br>2-2 Cloud SQL 關公網 IP / SSL / 每日備份<br>2-3 資料庫月租規格選單<br>2-4 & 2-5 選配 Vertex AI / 排程 EDM | ${state.STAGE2_LAST_RUN} | ${state.STAGE2_SUMMARY} |`,
-    `| **第三階段：上線前原始碼與 AI 總體檢** | 3-1 原始碼金鑰 0 外洩靜態掃描<br>3-2 20 題 AI 推薦準確度與防套話紅隊測試<br>3-3 網址預檢<br>3-4 MDN Observatory 評分 | ${state.STAGE3_LAST_RUN} | ${state.STAGE3_SUMMARY} |`,
+    `| **第三階段：上線前原始碼與 AI 總體檢** | 3-1 原始碼金鑰 0 外洩靜態掃描<br>3-2 20 題 AI 推薦準確度與防套話紅隊測試<br>3-3 網址預檢<br>3-4 MDN Observatory 評分<br>3-5 映像檔漏洞掃描 | ${state.STAGE3_LAST_RUN} | ${state.STAGE3_SUMMARY} |`,
     '',
     '## 二、 💰 雲端服務開啟清單與每月費用精算總表',
     '',
@@ -909,6 +1162,9 @@ function writeReports(params, runScan, runEval, codeResult, aiResult, targetDir,
     '| **5. Google OAuth 2.0（白名單登入）** | Testing 模式白名單（永久免費） | **NT$0** | **NT$0** |',
     `| **6. [選配] Vertex AI API** | ${state.SAVED_VERTEX_STATUS} | **NT$0** | 依實際呼叫量 |`,
     `| **7. [選配] 排程自動發送 EDM** | ${state.SAVED_EDM_STATUS} | **NT$0** | **NT$0**（免費層內） |`,
+    imageScanOn
+      ? `| **8. [選配] Artifact Analysis 映像檔掃描** | 已開通自動掃描（每次部署 US$${params.image_scan_usd_per_image}，以每月 ${params.image_scan_deploys_per_month} 次估，匯率是估的） | **約 NT$${imageNtd}** | **約 NT$${imageNtd}**（依實際部署次數） |`
+      : `| **8. [選配] Artifact Analysis 映像檔掃描** | 未開通（立即掃描一次 US$${params.image_scan_usd_per_image}，只在掃的時候收） | **NT$0** | **NT$0** |`,
     `| **📊 每月預估總花費合計** | **對照每月預算警示上限：NT$${budgetNtd} / 月** | **約 NT$${totalNormalMin}～${totalNormalMax} / 月** | **約 NT$${totalCapMin}～${totalCapMax} / 月** |`,
     '',
     `> **預算合規判定**：${budgetVerdict}`,
@@ -1190,7 +1446,7 @@ async function resolveTarget(cliArgs) {
 const args = process.argv.slice(2);
 {
   // 不認得的選項、--target／--source／--repo 缺值：直接結束碼 2（--url 缺值由 3-2 與 3-3／3-4 自己判斷，--api-path 缺值由 3-2 判斷，帶 --mock 時可略過；--api-path 只給 3-2 用）
-  const FLAGS = new Set(['--self-test', '--scan-only', '--eval-only', '--run-ai-eval', '--web-check', '--observatory', '--mock', '--target', '--source', '--repo', '--url', '--api-path']);
+  const FLAGS = new Set(['--self-test', '--scan-only', '--eval-only', '--run-ai-eval', '--web-check', '--observatory', '--image-scan', '--enable-image-scan', '--scan-now', '--mock', '--target', '--source', '--repo', '--url', '--api-path']);
   const NEED_VALUE = ['--target', '--source', '--repo'];
   const bad = args.find((a) => a.startsWith('--') && !FLAGS.has(a));
   if (bad) {
@@ -1210,13 +1466,16 @@ const scanOnly = args.includes('--scan-only');
 const evalOnly = args.includes('--eval-only');
 const fullRun = args.includes('--run-ai-eval');
 const webCheck = args.includes('--web-check');
-// --web-check 單獨用時只跑 3-3／3-4；同時指定原始碼（--target 等）或 --run-ai-eval 才連 3-1 一起跑
-const runScan = !evalOnly && (!webCheck || fullRun || ['--target', '--source', '--repo'].some((f) => args.includes(f)));
+const imageScan = args.includes('--image-scan');
+// --web-check、--image-scan 單獨用時只跑 3-3／3-4、3-5；同時指定原始碼（--target 等）或 --run-ai-eval 才連 3-1 一起跑
+const runScan = !evalOnly && (!(webCheck || imageScan) || fullRun || ['--target', '--source', '--repo'].some((f) => args.includes(f)));
 const runAiEval = evalOnly || fullRun || isSelfTest;
 const runWeb = (webCheck || fullRun) && !isSelfTest;
+const runImage = (imageScan || fullRun) && !isSelfTest;
 const NO_SOURCE_FLAGS = !['--target', '--source', '--repo'].some((f) => args.includes(f));
 if (scanOnly && webCheck && !fullRun && NO_SOURCE_FLAGS) console.log('ℹ️ --scan-only 搭配 --web-check 但沒指定原始碼，這次 3-1 不跑；要掃原始碼請加 --target "<原始碼資料夾>"');
 if (args.includes('--observatory') && !runWeb) console.log('ℹ️ --observatory 要搭配 --web-check 或 --run-ai-eval 才會跑 3-4，這次沒有作用');
+if (['--enable-image-scan', '--scan-now'].some((f) => args.includes(f)) && !runImage) console.log('ℹ️ --enable-image-scan、--scan-now 要搭配 --image-scan 或 --run-ai-eval 才會跑 3-5，這次沒有作用');
 
 const params = loadParams();
 console.log('==============================================================================');
@@ -1225,7 +1484,8 @@ console.log('===================================================================
 console.log(' 💬 【您可以怎麼跟這個驗收工具 / AI 小幫手互動？】：');
 console.log('   • 兩項全跑（預設推薦）：同時執行「細項 3-1 原始碼金鑰掃描」＋「細項 3-2 20 題 AI 紅隊測試」');
 console.log('   • 只挑單一細項跑：可跟 AI 說「只幫我掃描程式碼 (--scan-only)」、「只跑 20 題 AI 測試 (--eval-only)」或「只檢查網址 (--web-check)」');
-console.log('   • 全跑 (--run-ai-eval)：3-1、3-2，有網站網址時再加 3-3 網址預檢與 3-4 MDN Observatory 評分');
+console.log('   • 全跑 (--run-ai-eval)：3-1、3-2，有網站網址時再加 3-3 網址預檢與 3-4 MDN Observatory 評分，知道 GCP 專案時再加 3-5 映像檔漏洞掃描');
+console.log('   • 只掃映像檔 (--image-scan)：細項 3-5；開通自動掃描加 --enable-image-scan、立即掃描現在上線的版本加 --scan-now（都會花錢）');
 console.log('   • 自動雙報告輸出：跑完自動產生「第三階段單次報告」並更新「全部階段執行累計總報告」');
 console.log('------------------------------------------------------------------------------');
 console.log(` 📌 讀取參數檔 config/params.json：驗收題數=${params.eval_question_count} 題 | 預設測試預算=NT$${params.eval_max_budget_ntd.toLocaleString()} | EDM 日上限=${params.edm_daily_send_limit} 封`);
@@ -1293,6 +1553,12 @@ if (runWeb) {
 const codeResult = runScan ? scanCodebase(targetDir) : { passed: true, fileCount: 0, skippedChecks: 0, findings: [] };
 const aiResult = runAiEval ? await runAiEvaluation(params, evalTarget) : { passed: true, passedCount: 0, total: 0, passRate: 100 };
 const webResult = runWeb ? await runWebStage(params, webSite, webSkipWhy, obsConsent) : null;
+const imageResult = !runImage
+  ? null
+  : args.includes('--mock')
+    ? { passed: true, hasResult: false, status: '⏭️ 未執行（帶了 --mock，不連雲端）', findings: [], findingsPart: null, autoEnabled: null }
+    : await runImageScan(params, parseEnvState(STATE_FILE), args);
+const findingsFile = writeFindings([webResult && webResult.findingsPart, imageResult && imageResult.findingsPart]);
 
 if (isSelfTest) {
   const badAccVerdict = judgeResponse(
@@ -1363,26 +1629,60 @@ if (isSelfTest) {
   rstSrv.close();
   const resetOk = rst.accepted === undefined && String(rst.unknown || '').includes('ECONNRESET');
   if (!resetOk) wantCats.push('舊版 TLS 探測被中斷要算判斷不了');
-  const webOk = wantCats.every((c) => badCats.has(c)) && goodFindings.length === 0 && fieldsOk && httpOk && quietOk && obsOk && privOk && resetOk;
+  // 3-5 的判斷：describe 的結果包了好幾層、同一筆出現兩次；同一個 CVE 合成一筆、風險取高的；有修補版本的高、中風險才擋
+  const occ = (name, cve, sev, issue) => ({ name, kind: 'VULNERABILITY', noteName: `projects/goog-vulnz/notes/${cve}`, vulnerability: { effectiveSeverity: sev, packageIssue: [issue] } });
+  const nested = {
+    image_summary: { digest: 'sha256:x' },
+    discovery_summary: { discovery: [{ kind: 'DISCOVERY', discovery: { analysisStatus: 'FINISHED_SUCCESS' } }] },
+    package_vulnerability_summary: { vulnerabilities: {
+      CRITICAL: [occ('o1', 'CVE-2024-0001', 'CRITICAL', { affectedPackage: 'openssl', fixAvailable: true })],
+      HIGH: [occ('o2', 'CVE-2024-0002', 'HIGH', { affectedPackage: 'zlib', fixedVersion: { kind: 'MAXIMUM' } }),
+        occ('o3', 'CVE-2024-0003', 'LOW', { affectedPackage: 'curl', fixedVersion: { kind: 'NORMAL', name: '8.1' } }),
+        occ('o4', 'CVE-2024-0003', 'MEDIUM', { affectedLocation: { package: 'libcurl' }, fixedVersion: { kind: 'MAXIMUM' } })],
+      LOW: [occ('o1', 'CVE-2024-0001', 'CRITICAL', { affectedPackage: 'openssl', fixAvailable: true }),
+        occ('o5', 'CVE-2024-0005', 'MINIMAL', { affectedPackage: 'tzdata' })],
+    } },
+  };
+  const co = collectOccurrences(nested);
+  const imgRef = `asia-east1-docker.pkg.dev/p/cloud-run-source-deploy/art-web@sha256:${'a'.repeat(64)}`;
+  const im = imageFindings(imgRef, co.occs);
+  const findOf = (cve) => im.findings.find((f) => f.description.startsWith(cve)) || {};
+  const imgOk = co.occs.length === 5 && co.discovery === 'FINISHED_SUCCESS' && im.findings.length === 4 && im.blocking === 2
+    && findOf('CVE-2024-0001').severity === '高' && findOf('CVE-2024-0002').severity === '高' && findOf('CVE-2024-0003').severity === '中' && findOf('CVE-2024-0005').severity === '資訊'
+    && String(findOf('CVE-2024-0003').description).includes('curl、libcurl')
+    && im.findings.every((f) => f.category === 'IMG-VULN' && f.cwe === IMG_CWE && f.sources[0] === SRC_ARTIFACT && f.target === imgRef)
+    && imageFindings(imgRef, [occ('x', 'CVE-1', 'HIGH', { affectedPackage: 'a' })]).blocking === 0
+    && collectOccurrences({ a: [{ kind: 'DISCOVERY', discovery: { analysisStatus: 'PENDING' } }] }).discovery === 'PENDING'
+    && parseImageRef(imgRef)?.location === 'asia' && parseImageRef(imgRef.replace('asia-east1', 'europe-west1'))?.location === 'europe'
+    && parseImageRef(imgRef.replace('asia-east1', 'us-central1'))?.location === 'us'
+    && !parseImageRef('gcr.io/p/art-web@sha256:' + 'a'.repeat(64)) && !parseImageRef(imgRef.replace(/@sha256:.*/, ':latest'));
+  if (!imgOk) wantCats.push('3-5 映像檔掃描結果的判斷');
+  const webOk = wantCats.every((c) => badCats.has(c)) && goodFindings.length === 0 && fieldsOk && httpOk && quietOk && obsOk && privOk && resetOk && imgOk;
   if (!webOk) console.error(`❌ 3-3 判斷有誤：該抓的 ${wantCats.filter((c) => !badCats.has(c)).join('、') || '都有'}；正確設定誤判 ${goodFindings.length} 筆；欄位${fieldsOk ? '齊全' : '不齊'}`);
   if (badAccVerdict.pass || badInjVerdict.pass || !leakOk || !cleanOk || !webOk) {
     console.error('❌ 自我測試失敗：負面測資未被攔截！');
     process.exit(1);
   }
-  console.log('✅ [Self-Test 驗證通過] 負面測資（超預算、假畫作幻覺、EDM CC 名單外洩、個資套話、網址預檢的設定缺漏、Observatory 評分對應與內網主機名稱）攔截邏輯運作正常！');
+  console.log('✅ [Self-Test 驗證通過] 負面測資（超預算、假畫作幻覺、EDM CC 名單外洩、個資套話、網址預檢的設定缺漏、Observatory 評分對應、內網主機名稱與映像檔弱點）攔截邏輯運作正常！');
 }
 
-const { singleReportPath, fullReportPath } = writeReports(params, runScan, runAiEval, codeResult, aiResult, targetDir, evalTarget, webResult);
+const { singleReportPath, fullReportPath } = writeReports(params, runScan, runAiEval, codeResult, aiResult, targetDir, evalTarget, webResult, imageResult, findingsFile);
 
 console.log('\n==============================================================================');
 console.log(' 📄 報告已自動輸出（單次報告 ＋ 全部執行累計總報告）');
 console.log('==============================================================================');
 console.log(` • 單次執行成果報告：${singleReportPath}`);
 console.log(` • 全部執行累計總表：${fullReportPath}`);
-if (webResult && webResult.findingsFile) console.log(` • 網址檢查結果（給弱掃合併用）：${webResult.findingsFile}`);
+if (findingsFile) console.log(` • 網址與映像檔檢查結果（給弱掃合併用）：${findingsFile}`);
 console.log('------------------------------------------------------------------------------');
 
-if (codeResult.passed && aiResult.passed && (!webResult || webResult.passed)) {
+// 明說要掃映像檔（--image-scan）卻沒有結果：不印 PASS，結束碼 2（報告與開通紀錄照樣寫好）
+if (imageScan && !fullRun && imageResult && !imageResult.hasResult) {
+  console.log(` ❌ --image-scan 這次沒有掃描結果：${imageResult.status.replace(/^⏭️ 未執行（(.*)）$/, '$1')}`);
+  console.log('==============================================================================');
+  process.exit(2);
+}
+if (codeResult.passed && aiResult.passed && (!webResult || webResult.passed) && (!imageResult || imageResult.passed)) {
   console.log(' 🎉 第三階段總體檢結果：PASS（全數通過，符合上線驗收標準）');
   console.log('==============================================================================');
   process.exit(0);
@@ -1394,6 +1694,9 @@ if (codeResult.passed && aiResult.passed && (!webResult || webResult.passed)) {
   if (webResult && !webResult.passed) {
     for (const f of webResult.findings.filter((x) => x.severity === '高' || x.severity === '中')) console.log(`   - [${f.category}] ${f.target}: ${f.description}`);
     if (!webResult.findings.length) console.log(`   - 3-3 網址預檢：${webResult.status33}`);
+  }
+  if (imageResult && !imageResult.passed) {
+    for (const f of imageResult.findings.filter((x) => (x.severity === '高' || x.severity === '中') && x.description.includes('已有修補版本'))) console.log(`   - [${f.category}] ${f.description}`);
   }
   console.log('==============================================================================');
   process.exit(1);
