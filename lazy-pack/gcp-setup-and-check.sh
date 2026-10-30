@@ -1323,7 +1323,7 @@ FULL_REPORT_FILE="${REPORTS_DIR}/full-execution-report.md"
 {
   echo "# 藏家推薦系統 — 全部階段執行累計總報告 (Full Execution Report)"
   echo ""
-  echo "> 本報告由 Lazy Pack 自動彙整更新，完整記錄第一階段、第二階段、第三階段之最新執行成果與每月雲端費用精算，可直接提供予資訊部與部門主管審閱。"
+  echo "> 本報告由 Lazy Pack 自動彙整更新，完整記錄第一階段、第二階段、第三階段之最新執行成果與每月雲端費用精算，可直接提供予資訊相關權責單位與部門主管審閱。"
   echo ""
   echo "- **最後更新時間**：${HUMAN_TIME}"
   echo "- **目標 GCP 專案**：\`${PROJECT_ID}\`"

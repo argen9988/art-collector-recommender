@@ -550,7 +550,7 @@ function writeReports(params, runScan, runEval, codeResult, aiResult, targetDir,
   const fullMd = [
     '# 藏家推薦系統 — 全部階段執行累計總報告 (Full Execution Report)',
     '',
-    '> 本報告由 Lazy Pack 自動彙整更新，完整記錄第一階段、第二階段、第三階段之最新執行成果與每月雲端費用精算，可直接提供予資訊部與部門主管審閱。',
+    '> 本報告由 Lazy Pack 自動彙整更新，完整記錄第一階段、第二階段、第三階段之最新執行成果與每月雲端費用精算，可直接提供予資訊相關權責單位與部門主管審閱。',
     '',
     `- **最後更新時間**：${humanTime}`,
     `- **目前設定之每月預算警示上限**：**NT$${budgetNtd} / 月**（軟止損提醒鈴）`,
