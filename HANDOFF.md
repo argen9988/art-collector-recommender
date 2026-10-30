@@ -18,12 +18,11 @@
 - 換字 23 處，信件草稿（只留本機）的「部長」統稱「主管」（本次 commit）
 - D8 錯誤回報採 A＋D（`D:\Dev\company\art-collector-recommender\docs\decisions\2026-10.md`）
 - 三條新待辦寫進 todo-plan（錯誤回報、第三階段×自架平台、Firebase）
-- reflection 本機版 `D:\Dev\project-records\company\art-collector-recommender\reflections\2026-10-30_windows_feature-design.md`；歷程本機版已加段
+- reflection 本機版 `D:\Dev\project-records\company\art-collector-recommender\reflections\2026-10-30_windows_feature-design.md`；歷程本機版已加段；去識別化版已寫進 second-brain（`創作庫/reflections/2026-10-30_windows_feature-design.md`、`公司專案/art-collector-recommender/歷程/2026-10-30_windows.md`）
 
 ## 還沒做完
 
 - 上面「下一步」第 1～4 項
-- **second-brain 去識別化版還沒寫**（等使用者看過）：reflection `C:\Users\87094024\AppData\Local\Temp\claude\D--Dev-company-art-collector-recommender\44a8683e-5055-420b-a88e-7ebbc7e1516b\scratchpad\deid_reflection2.md`、歷程一段 `...\scratchpad\deid_journey2.md`（暫存資料夾，session 結束可能清掉；清掉的話用本機版重做去識別化）。寫入位置：`創作庫/reflections/2026-10-30_windows_feature-design.md`（先確認沒有同名）與 `公司專案/art-collector-recommender/歷程/2026-10-30_windows.md`
 - 429／5xx 退避、真實推薦端點的路徑與格式（todo-plan「【小補強】」「【待確認】」）
 - 第一至第三階段的實際 GCP 設定與整合驗收
 
