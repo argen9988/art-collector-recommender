@@ -527,7 +527,7 @@ st11() { printf 'SAVED_PROJECT_ID="proj-a"\nSAVED_CLOUD_RUN_SERVICE="art-web"\n%
 occ() { printf '{"name":"projects/proj-a/occurrences/%s","kind":"VULNERABILITY","noteName":"projects/goog-vulnz/notes/%s","vulnerability":{"effectiveSeverity":"%s"%s,"packageIssue":[%s]}}' "$@"; }
 V1="$(occ o1 CVE-2099-0001 HIGH ',"fixAvailable":true' '{"affectedPackage":"openssl","fixedVersion":{"kind":"NORMAL","name":"3.0.99"}}')"
 V1b="$(occ o1b CVE-2099-0001 HIGH '' '{"affectedPackage":"libssl3","fixedVersion":{"kind":"NORMAL","name":"3.0.99"}}')"
-V2="$(occ o2 CVE-2099-0002 CRITICAL ',"fixAvailable":false' '{"affectedPackage":"zlib","fixedVersion":{"kind":"MAXIMUM"}}')"
+V2="$(occ o2 CVE-2099-0002 CRITICAL ',"fixAvailable":false' '{"affectedPackage":"zlib"}')"
 V3="$(occ o3 CVE-2099-0003 LOW '' '{"affectedLocation":{"package":"curl"},"fixedLocation":{"version":{"kind":"NORMAL","name":"8.99"}}}')"
 V4="$(occ o4 CVE-2099-0004 MEDIUM '' '{"affectedPackage":"bash","fixedVersion":{"kind":"MAXIMUM"}}')"
 DONE='{"kind":"DISCOVERY","discovery":{"analysisStatus":"FINISHED_SUCCESS"}}'
@@ -536,6 +536,16 @@ printf '{"discovery_summary":{"discovery":[%s]},"package_vulnerability_summary":
 printf '{"discovery_summary":{"discovery":[%s]}}\n' "$DONE" > "$S/img-clean.json"
 printf '{"discovery_summary":{"discovery":[{"kind":"DISCOVERY","discovery":{"analysisStatus":"PENDING"}}]}}\n' > "$S/img-pending.json"
 printf '[%s,%s,%s,%s,%s]\n' "$V1" "$V1b" "$V2" "$V3" "$V4" > "$S/scan-mixed.json"
+# 中風險＋有修補版本也要擋（只有這一筆）；還在掃（SCANNING）但已有部分弱點；packageIssue 裡夾 null；超過 1MB 的輸出
+V5="$(occ o5 CVE-2099-0005 MEDIUM ',"fixAvailable":true' '{"affectedPackage":"glibc"}')"
+printf '{"discovery_summary":{"discovery":[%s]},"package_vulnerability_summary":{"vulnerabilities":{"MEDIUM":[%s]}}}\n' "$DONE" "$V5" > "$S/img-medfix.json"
+printf '{"discovery_summary":{"discovery":[{"kind":"DISCOVERY","discovery":{"analysisStatus":"SCANNING"}}]},"package_vulnerability_summary":{"vulnerabilities":{"HIGH":[%s]}}}\n' "$V1" > "$S/img-partial.json"
+printf '{"discovery_summary":{"discovery":[%s]},"package_vulnerability_summary":{"vulnerabilities":{"LOW":[%s]}}}\n' "$DONE" "$(occ o6 CVE-2099-0006 LOW '' 'null,{"affectedPackage":"nullpkg"}')" > "$S/img-nullpkg.json"
+node -e '
+const fs = require("fs");
+const d = JSON.parse(fs.readFileSync(process.argv[1], "utf-8"));
+d.padding = "x".repeat(2 * 1024 * 1024);
+fs.writeFileSync(process.argv[2], JSON.stringify(d));' "$(mp "$S/img-clean.json")" "$(mp "$S/img-big.json")"
 IMG_NTD="$(node -e 'const p=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8"));console.log(Math.round(p.image_scan_usd_per_image*p.image_scan_deploys_per_month*p.usd_twd_rate))' "$(mp "$R/config/params.json")")"
 
 # 沒開通、不是終端機：不問、不開通（管線的 y 不算同意）；--image-scan 沒結果 → 結束碼 2，不動 findings.json
@@ -561,6 +571,7 @@ gl_has t11b "services enable containerscanning.googleapis.com --project=proj-a"
 gl_not t11b "ondemandscanning"
 chk t11b "已開通自動掃描。剛開通自動掃描，現在上線的版本要等下次部署才會被掃"
 grep -q '^SAVED_IMAGE_SCAN_ENABLED=1' "$ST" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t11b] 狀態檔沒記下已開通（1）"; }
+[ "$IMG_NTD" = 169 ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t11b] 預設參數 0.26×20×32.5 該是 169，算出 $IMG_NTD（params.json 改過就同步改這裡）"; }
 grep -q "8. \[選配\] Artifact Analysis 映像檔掃描\*\* | 已開通自動掃描.* | \*\*約 NT\$$IMG_NTD\*\* |" "$FULL" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t11b] 累計總報告第 8 項應是 NT\$$IMG_NTD"; }
 # 開通失敗：專案維持原狀，狀態檔記沒開通
 st11
@@ -594,12 +605,38 @@ FAKE_AUTO_SCAN=1 FAKE_IMAGE_DESCRIBE="$(mp "$S/img-nofix.json")" run --image-sca
 chk t11d "✅ 3-5 通過（自動掃描：1 個弱點，其中 1 個高、中風險還沒有修補版本）"
 chk t11d "第三階段總體檢結果：PASS"
 st11
+printf '[{"category":"WEB-OLD","id":"KEEP"},{"category":"IMG-VULN","id":"OLD-IMG"}]\n' > "$FND"
 FAKE_AUTO_SCAN=1 FAKE_IMAGE_DESCRIBE="$(mp "$S/img-clean.json")" run --image-scan < /dev/null; rc_is t11d2 $? 0
 chk t11d2 "✅ 3-5 通過（自動掃描：0 個弱點，沒有高、中風險）"
+# 真的 0 個弱點：清掉舊的 IMG-，其他細項的留著
+node -e '
+const f = JSON.parse(require("fs").readFileSync(process.argv[1], "utf-8"));
+process.exit(f.some((x) => x.id === "KEEP") && !f.some((x) => x.id === "OLD-IMG") ? 0 : 1);' "$(mp "$FND")" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t11d2] 0 個弱點時該清掉舊的 IMG-、留下 WEB-"; }
 # 還在掃：沒結果、結束碼 2
 st11
 FAKE_AUTO_SCAN=1 FAKE_IMAGE_DESCRIBE="$(mp "$S/img-pending.json")" run --image-scan < /dev/null; rc_is t11e $? 2
 chk t11e "自動掃描還在跑，過幾分鐘再跑一次 3-5"
+# 還在掃（SCANNING）但已有部分弱點：當沒有結果，不判通過或未通過，不蓋掉舊的 IMG-
+st11
+printf '[{"category":"IMG-VULN","id":"OLD-IMG"}]\n' > "$FND"; cp "$FND" "$S/fnd.old"
+FAKE_AUTO_SCAN=1 FAKE_IMAGE_DESCRIBE="$(mp "$S/img-partial.json")" run --image-scan < /dev/null; rc_is t11e2 $? 2
+chk t11e2 "自動掃描還在跑，過幾分鐘再跑一次 3-5"
+nochk t11e2 "3-5 未通過"
+cmp -s "$FND" "$S/fnd.old" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t11e2] 還在掃時不該改寫 findings.json"; }
+# 中風險＋有修補版本：也要擋
+st11
+FAKE_AUTO_SCAN=1 FAKE_IMAGE_DESCRIBE="$(mp "$S/img-medfix.json")" run --image-scan < /dev/null; rc_is t11e3 $? 1
+chk t11e3 "❌ 3-5 未通過（自動掃描：1 個弱點，其中 1 個高、中風險已有修補版本）"
+# packageIssue 裡夾 null：不當掉，照樣算出結果
+st11
+FAKE_AUTO_SCAN=1 FAKE_IMAGE_DESCRIBE="$(mp "$S/img-nullpkg.json")" run --image-scan < /dev/null; rc_is t11e4 $? 0
+chk t11e4 "✅ 3-5 通過（自動掃描：1 個弱點，沒有高、中風險）"
+grep -q 'CVE-2099-0006（套件：nullpkg）' "$FND" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t11e4] findings.json 沒有 nullpkg 那筆"; }
+# 輸出超過 1MB：不能被當成 gcloud 執行失敗
+st11
+FAKE_AUTO_SCAN=1 FAKE_IMAGE_DESCRIBE="$(mp "$S/img-big.json")" run --image-scan < /dev/null; rc_is t11e5 $? 0
+chk t11e5 "✅ 3-5 通過（自動掃描：0 個弱點，沒有高、中風險）"
+nochk t11e5 "讀不到掃描結果"
 
 # --scan-now：自動掃描沒結果 → 先開通 ondemandscanning，再立即掃描（資料處理地點照 asia-east1 → asia）
 st11

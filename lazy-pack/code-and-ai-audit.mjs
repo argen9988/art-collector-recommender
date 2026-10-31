@@ -15,7 +15,7 @@
  *   node lazy-pack/code-and-ai-audit.mjs --self-test                                      # 掃描 tests/fixtures 的乾淨假專案
  *   node lazy-pack/code-and-ai-audit.mjs                                                  # 沒帶 --target：出「原始碼從哪裡來」選單
  *   node lazy-pack/code-and-ai-audit.mjs --target "<藏家系統原始碼目錄>"                  # 僅跑細項 3-1 原始碼掃描
- *   node lazy-pack/code-and-ai-audit.mjs --target "<藏家系統原始碼目錄>" --run-ai-eval     # 全跑：3-1 + 3-2，有網址時再加 3-3、3-4
+ *   node lazy-pack/code-and-ai-audit.mjs --target "<藏家系統原始碼目錄>" --run-ai-eval     # 全跑：3-1 + 3-2，有網址時再加 3-3、3-4，知道 GCP 專案時再加 3-5
  *   node lazy-pack/code-and-ai-audit.mjs --eval-only                                      # 僅跑細項 3-2 AI 20 題測試（不需原始碼）
  *   node lazy-pack/code-and-ai-audit.mjs --source cloud|github|local [--repo "<GitHub 網址>"]  # 不出選單，直接指定來源
  *   node lazy-pack/code-and-ai-audit.mjs --eval-only --url "<Cloud Run 網址>" [--api-path /api/recommend]  # 20 題打真實線上網站
@@ -35,7 +35,8 @@
  *   自動掃描（containerscanning）只掃開通後新推的映像檔；沒有結果時可立即掃描（ondemandscanning，gcloud artifacts docker images scan --remote）
  *   開通與立即掃描都會花錢（見 config/params.json 的 image_scan_*）：要 --enable-image-scan／--scan-now 或在終端機回答 y，管線的回答不算同意
  *   高、中風險而且已有修補版本的讓第三階段不通過；沒有修補版本的照樣寫進 findings.json（IMG-VULN），不擋上線
- *   --image-scan 這次沒有掃描結果時結束碼 2；--run-ai-eval 沒有結果時只在報告註明
+ *   --image-scan 這次沒有掃描結果時結束碼 2（--mock 不連雲端，也算沒有結果）；--run-ai-eval 沒有結果時只在報告註明
+ *   自動掃描還在跑（PENDING、SCANNING）時，即使已有部分弱點也當沒有結果，不蓋掉舊的 IMG- 結果
  *
  * 細項 3-2 的測試對象（--self-test 一律本機模擬）：
  *   --url 帶的網址 → 沒帶就用第一階段記下的 SAVED_CLOUD_RUN_URL → 都沒有（或帶 --mock）就用本機模擬回應
@@ -830,7 +831,7 @@ function imageFindings(imageRef, occs) {
     const v = o.vulnerability || {};
     const id = String(o.noteName || '').split('/').pop() || '（沒有編號）';
     const sev = IMG_SEVERITY[String(v.effectiveSeverity || v.severity || '').toUpperCase()] || '資訊';
-    const issues = Array.isArray(v.packageIssue) ? v.packageIssue : [];
+    const issues = Array.isArray(v.packageIssue) ? v.packageIssue.filter((p) => p && typeof p === 'object') : [];
     const fix = v.fixAvailable === true || issues.some((p) => p.fixAvailable === true
       || [p.fixedVersion, p.fixedLocation && p.fixedLocation.version].some((ver) => ver && ver.kind === 'NORMAL'));
     const cur = byId.get(id) || { id, sev, fix: false, pkgs: new Set() };
@@ -854,7 +855,7 @@ function parseImageRef(ref) {
   const m = String(ref || '').match(/^([a-z0-9-]+)-docker\.pkg\.dev\/[^/@]+\/[^/@]+\/[^@]+@sha256:[0-9a-f]{64}$/);
   if (!m) return null;
   const region = m[1];
-  // 立即掃描的資料處理地點只有 us、europe、asia 三種
+  // 立即掃描的資料處理地點只有 us、europe、asia 三種；其他地區（southamerica、me、africa 開頭等）一律當 us 是程式自己的假設，還沒拿真的環境核對
   const location = region.startsWith('europe') ? 'europe' : region.startsWith('asia') || region.startsWith('australia') ? 'asia' : 'us';
   return { ref, region, location };
 }
@@ -946,8 +947,10 @@ async function runImageScan(params, state, cliArgs) {
     const d = gcloudJson(['artifacts', 'docker', 'images', 'describe', img.ref, '--show-package-vulnerability']);
     if (!d.ok) return skip(`讀不到掃描結果（${d.err}）`, true);
     const { occs, discovery } = collectOccurrences(d.data);
-    if (occs.length || discovery === 'FINISHED_SUCCESS') return done(occs, '自動掃描');
-    pendingWhy = discovery === 'PENDING' || discovery === 'SCANNING'
+    // 還在掃（PENDING、SCANNING）時即使已有部分弱點也不是完整結果：當成沒有結果，不蓋掉舊的 IMG-
+    const stillScanning = discovery === 'PENDING' || discovery === 'SCANNING';
+    if (discovery === 'FINISHED_SUCCESS' || (occs.length && !stillScanning)) return done(occs, '自動掃描');
+    pendingWhy = stillScanning
       ? '自動掃描還在跑，過幾分鐘再跑一次 3-5'
       : discovery === 'FINISHED_UNSUPPORTED'
         ? 'Artifact Analysis 不支援這份映像檔的作業系統'
@@ -1214,6 +1217,9 @@ async function ask(question) {
   return answer;
 }
 
+// spawnSync 預設只收 1MB，弱點多的映像檔 `images describe` 會超過而被當成執行失敗
+const RUN_MAX_BUFFER = 256 * 1024 * 1024;
+
 // Windows 的 gcloud、git 是 .cmd，要經 cmd.exe 才找得到；參數一律加雙引號
 function runCmd(cmd, cmdArgs, opts = {}) {
   // Windows 經 cmd.exe：任何參數含這些字元（雙引號內 %VAR% 也會展開）就不執行
@@ -1221,8 +1227,8 @@ function runCmd(cmd, cmdArgs, opts = {}) {
     return { ok: false, stdout: '', stderr: '參數含特殊字元（" & | < > ^ %），為安全起見不執行' };
   }
   const r = process.platform === 'win32'
-    ? spawnSync([cmd, ...cmdArgs.map((a) => `"${a}"`)].join(' '), { shell: true, encoding: 'utf-8', ...opts })
-    : spawnSync(cmd, cmdArgs, { encoding: 'utf-8', ...opts });
+    ? spawnSync([cmd, ...cmdArgs.map((a) => `"${a}"`)].join(' '), { shell: true, encoding: 'utf-8', maxBuffer: RUN_MAX_BUFFER, ...opts })
+    : spawnSync(cmd, cmdArgs, { encoding: 'utf-8', maxBuffer: RUN_MAX_BUFFER, ...opts });
   return { ok: r.status === 0, stdout: (r.stdout || '').trim(), stderr: (r.stderr || '').trim() };
 }
 
