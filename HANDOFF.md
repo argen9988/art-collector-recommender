@@ -4,7 +4,7 @@
 
 ## 下一步
 
-1. 3-5 真雲端驗收（段 C 第 3 件，**需要使用者在場**）：前置都備好了（見「已完成」）。照順序：①開 Artifact Registry 與掃描用的 API（`artifactregistry`、`ondemandscanning`、`containeranalysis`，必要時 `containerscanning`），建一個 Artifact Registry 倉庫（地區用 `asia-east1`，立即掃描的資料處理地點只有 us、europe、asia）；②推一份很小的映像檔（例如 `alpine` 舊版，好讓有漏洞可看）；③**動手前再問使用者**：立即掃描一份約 US$0.26（實際收到 NT$ 帳單，專案已設 NT$150 預算警示）；④核對 `images describe --show-package-vulnerability`、`scan --remote`、`list-vulnerabilities` 的輸出格式、修補版本欄位與 location，把真輸出丟進 `lazy-pack/code-and-ai-audit.mjs` 的解析程式，看 `reports\findings.json` 對不對；⑤驗完整個專案 `gcloud projects delete art-rec-verify-7k2m`。要用拋棄式專案，`gcloud config` 的 `core/project` 已指到它（用 `gcloud config get project` 確認）。建議模型與努力程度：Sonnet、high（核心是比對真輸出與解析結果，可客觀檢查；動手前的花費確認照舊問使用者）
+1. 3-5 立即掃描的真雲端驗收（**要在 Mac 做**，Windows 版 gcloud 不支援立即掃描；需要使用者在場）：自動掃描那半已在 Windows 驗完（見「已完成」）。Mac 步驟：①裝 gcloud（先講來源與大小、等同意）並登入同一個帳號；②`gcloud config set project art-rec-verify-7k2m`（拋棄式專案保留中，`ondemandscanning` 已開，映像檔 `asia-east1-docker.pkg.dev/art-rec-verify-7k2m/verify-repo/old-alpine@sha256:25ef6b512276e407c80098e3e3489bbf847588529583581d082f3ad6af726814` 已在）；③**動手前問使用者**：立即掃描一次約 US$0.26；④`gcloud artifacts docker images scan <映像檔> --remote --location=asia --format=json`，再 `list-vulnerabilities <掃描名稱> --format=json`，核對輸出格式、`response.scan` 欄位與 location 對應，丟進 `collectOccurrences`／`imageFindings`（預期同樣 1 筆 CVE-2021-36159、高、已有修補）；⑤驗完 `gcloud projects delete art-rec-verify-7k2m`。細節在 `docs/todo-plan.md`「【細項 3-5】」。建議 Sonnet、high
 
 ## 目標與做到哪
 
@@ -14,7 +14,7 @@
 
 - C 槽只剩 1.5 GB：查到前一個 session 留下的 `python.exe -` 把背景輸出檔寫到 13.5 GB，結束行程、永久刪除該檔，C 槽回到 14.87 GB；另 1,300 MB（VS 解壓資料夾 7 個、VS Code 擴充快取 5 項）在資源回收筒，等使用者清空
 - 真因與防線：空的標準輸入（空 heredoc、`< /dev/null`）讓這台 Python 3.14 進互動模式無限印 `Traceback`；dotfiles `pretooluse-backslash.sh` 加檢查、測試 35 項全過、真 Bash 工具實測擋得到（dotfiles `3331be6`），pitfalls 補一條（ai-companion `e511c32`）
-- 真雲端驗收前置：scoop 裝 `gcloud` 591.0.0（`C:\Users\87094024\scoop\apps\gcloud\`，374 MB）、`gcloud auth login` 已登入（使用者的 Google 帳號）、建拋棄式專案 `art-rec-verify-7k2m`、綁到使用者既有的帳單帳戶、預算警示 NT$150（帳戶幣別是新台幣，用美元會 INVALID_ARGUMENT；帳戶原本就有一個 NT$10 的預算，沒動）。**還沒開掃描 API、沒推映像檔、沒掃描、沒有花費**
+- 真雲端驗收前置：scoop 裝 `gcloud` 591.0.0（`C:\Users\87094024\scoop\apps\gcloud\`，374 MB）、`gcloud auth login` 已登入（使用者的 Google 帳號）、建拋棄式專案 `art-rec-verify-7k2m`、綁到使用者既有的帳單帳戶、預算警示 NT$150（帳戶幣別是新台幣，用美元會 INVALID_ARGUMENT；帳戶原本就有一個 NT$10 的預算，沒動）。**2026-10-31 下午已開掃描 API、用 Cloud Build 推 `alpine:3.10` 舊版、自動掃描 US$0.26（約 NT$8.5）**；自動掃描輸出核對完、解析程式不用改；立即掃描 Windows 不支援（沒花錢），專案保留給 Mac 驗
 - 施工紀錄見 `D:\Dev\company\art-collector-recommender\docs\worklog\2026-10.md`「2026-10-31 C 槽清理…」；真名版 reflection 在 `D:\Dev\project-records\company\art-collector-recommender\reflections\2026-10-31_windows_disk-cleanup.md`，歷程已追加
 
 ## 還沒做完
