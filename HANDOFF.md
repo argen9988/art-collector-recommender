@@ -12,7 +12,7 @@
 
 ## 目標與做到哪
 
-讓沒有資訊背景的執行者把 Lazy Pack 交給 AI Agent 就能跑完三階段檢查，出錯時能把問題用電子郵件回報給資訊相關權責單位。錯誤回報四段都做完；交接包、整輪真雲端驗收還沒做。
+讓沒有資訊背景的執行者把 Lazy Pack 交給 AI Agent 就能跑完三階段檢查，出錯時能把問題用電子郵件回報給資訊相關權責單位。錯誤回報四段都做完（reflection、專案紀錄也寫完，去識別化版已進 second-brain）；交接包、整輪真雲端驗收還沒做。
 
 ## 已完成
 
@@ -22,7 +22,6 @@
 ## 還沒做完
 
 - 上面「下一步」各項
-- reflection 與專案紀錄：(b1)、(b2)、(c) 都還沒寫完。(b1) 的完整版在 `D:\Dev\project-records\company\art-collector-recommender\reflections\2026-10-31_windows_feature-testing-4.md`，歷程在同資料夾 `journey\2026-10-31_windows.md`；去識別化版還沒給使用者看、沒寫進 second-brain；(b2)、(c) 完整版也還沒寫。公司專案：完整版寫 project-records，去識別化版先給使用者看
 - 這個專案的整輪真雲端驗收（第一、二階段）還沒跑過
 - 使用者自己清空資源回收筒才會釋放 C 槽空間
 - Codex 當主線呼叫別家的驗證：`D:\Dev\personal\ai-companion\docs\todo-plan.md`「反方向派工」，等 Codex 訂閱
