@@ -1549,7 +1549,7 @@ function problemLogSection(script) {
   const lines = redactSecrets(fs.readFileSync(path.join(LOGS_DIR, files[0].n), 'utf-8')).split(/\r?\n/);
   const header = lines.find((l) => l.startsWith('# ') && l.includes('開始')) || '（沒有開始紀錄）';
   const footer = lines.find((l) => l.startsWith('# 結束')) || '# （沒有結束紀錄：執行中途被中斷，或當掉）';
-  const probs = [...new Set(lines.filter((l) => /❌|⚠|Traceback|Error:/.test(l)).map((l) => l.trim()))].slice(0, LOG_PROBLEM_LINES);
+  const probs = [...new Set(lines.filter((l) => /❌|⚠|Traceback|Error:|（gcloud 錯誤）/.test(l)).map((l) => l.trim()))].slice(0, LOG_PROBLEM_LINES);
   const tail = lines.slice(-LOG_TAIL_LINES).join('\n');
   return [
     `### ${script}（紀錄檔 ${files[0].n}）`,

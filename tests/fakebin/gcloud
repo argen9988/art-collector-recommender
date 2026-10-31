@@ -3,7 +3,13 @@
 echo "$*" >> "${FAKE_GCLOUD_LOG:-/dev/null}"
 args="$*"
 # FAKE_GCLOUD_FAIL=<片段>：參數含這段字的呼叫一律失敗（測「gcloud 失敗不計入已完成」）
-[ -n "${FAKE_GCLOUD_FAIL:-}" ] && [[ "$args" == *"$FAKE_GCLOUD_FAIL"* ]] && exit 1
+# FAKE_GCLOUD_FAIL_MSG：失敗時把這段文字印到 stderr（沒給就不印）
+if [ -n "${FAKE_GCLOUD_FAIL:-}" ] && [[ "$args" == *"$FAKE_GCLOUD_FAIL"* ]]; then
+  [ -n "${FAKE_GCLOUD_FAIL_MSG:-}" ] && printf '%s\n' "$FAKE_GCLOUD_FAIL_MSG" >&2
+  exit 1
+fi
+# FAKE_GCLOUD_WARN_ON=<片段>、FAKE_GCLOUD_WARN=<文字>：參數含這段字的呼叫照常成功，但在 stderr 印一行警告
+[ -n "${FAKE_GCLOUD_WARN_ON:-}" ] && [[ "$args" == *"$FAKE_GCLOUD_WARN_ON"* ]] && printf '%s\n' "${FAKE_GCLOUD_WARN:-WARNING: fake}" >&2
 # 細項 3-5 用：FAKE_IMAGE_REF 換網站的映像檔、FAKE_AUTO_SCAN=1／FAKE_ON_DEMAND=1 當成已開通，
 # FAKE_IMAGE_DESCRIBE／FAKE_SCAN_VULNS 指到 JSON 檔當成自動掃描／立即掃描的結果（沒給就是沒有結果）
 IMG_REF="${FAKE_IMAGE_REF:-asia-east1-docker.pkg.dev/proj-a/cloud-run-source-deploy/art-web@sha256:$(printf 'a%.0s' {1..64})}"

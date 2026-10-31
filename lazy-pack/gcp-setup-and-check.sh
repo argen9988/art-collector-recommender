@@ -110,6 +110,28 @@ lp_redact() {
   LC_ALL=C sed "${LP_SED_ARGS[@]}"
 }
 
+# 查現況用的 gcloud 呼叫：終端機畫面和原本一樣（錯誤訊息不印）；有全程記錄時，失敗或有錯誤訊息的那次遮蔽後記進紀錄
+# 先寫到 ${紀錄檔}.gcerr 再讀，標準輸出和結束碼原樣交還給呼叫的地方；記不下來就照舊丟掉
+lp_gcloud() {
+  local rc err line tmp="${LAZY_PACK_LOG_FILE:-}"
+  if [ -z "$tmp" ] || ! { : >"${tmp}.gcerr"; } 2>/dev/null; then
+    command gcloud "$@" 2>/dev/null
+    return
+  fi
+  command gcloud "$@" 2>"${tmp}.gcerr"
+  rc=$?
+  err="$(<"${tmp}.gcerr")"
+  err="${err//$'\r'/}"
+  if [ "$rc" -ne 0 ] || [ -n "$err" ]; then
+    [ -n "${LP_SED_ARGS+x}" ] || lp_redact_init
+    {
+      printf '（gcloud 錯誤）結束碼 %s：gcloud %s\n' "$rc" "$*"
+      while IFS= read -r line; do printf '（gcloud 錯誤）%s\n' "$line"; done <<<"$err"
+    } | lp_redact >> "$tmp" 2>/dev/null
+  fi
+  return "$rc"
+}
+
 # 照 (a) 的格式把整支腳本再跑一次並記錄：開頭 # … 開始、結尾 # 結束，結束碼 N；記不下來（唯讀、滿了）就回傳 1，讓檢查照常跑
 lp_run_logged() {
   local dir="${LAZY_PACK_LOGS_DIR:-${REPO_ROOT}/reports/logs}" now base file i=2 rc made
@@ -124,9 +146,10 @@ lp_run_logged() {
   printf '# %s.sh 開始 %s｜參數：%s｜bash %s｜%s\n' "$SCRIPT_NAME" "${now#*|}" "$*" "${BASH_VERSION:-?}" "$(uname -sr 2>/dev/null)" | lp_redact >> "$file"
   trap ':' INT   # Ctrl-C 只打斷裡面那支，這裡還要把結尾寫進紀錄
   {
-    LAZY_PACK_LOGGING=1 "$BASH" "$SELF" "$@" 2>&1 | tee /dev/fd/3 | lp_redact >> "$file"
+    LAZY_PACK_LOGGING=1 LAZY_PACK_LOG_FILE="$file" "$BASH" "$SELF" "$@" 2>&1 | tee /dev/fd/3 | lp_redact >> "$file"
     rc=${PIPESTATUS[0]}
   } 3>&1
+  rm -f "${file}.gcerr"
   printf '\n# 結束，結束碼 %s\n' "$rc" >> "$file"
   exit "$rc"
 }
@@ -453,14 +476,14 @@ list_cloud_run_services() {
     [ "$pid" = "demo-art-collector-proj" ] && printf "art-collector-web\thttps://art-collector-web-demo-uc.a.run.app\n"
     return 0
   fi
-  if gcloud services list --enabled --project="$pid" --filter="config.name:run.googleapis.com" --format="value(config.name)" </dev/null 2>/dev/null | grep -q "run.googleapis.com"; then
-    gcloud run services list --project="$pid" --platform=managed --format="value(metadata.name,status.url)" --quiet </dev/null 2>/dev/null || true
+  if lp_gcloud services list --enabled --project="$pid" --filter="config.name:run.googleapis.com" --format="value(config.name)" </dev/null | grep -q "run.googleapis.com"; then
+    lp_gcloud run services list --project="$pid" --platform=managed --format="value(metadata.name,status.url)" --quiet </dev/null || true
   fi
 }
 
 DEFAULT_GCLOUD_PROJECT=""
 if [ "$MODE" != "dry-run" ]; then
-  DEFAULT_GCLOUD_PROJECT="$(gcloud config get-value project 2>/dev/null || true)"
+  DEFAULT_GCLOUD_PROJECT="$(lp_gcloud config get-value project || true)"
   [ "$DEFAULT_GCLOUD_PROJECT" = "(unset)" ] && DEFAULT_GCLOUD_PROJECT=""
 fi
 
@@ -469,7 +492,7 @@ if [ -z "$PROJECT_ID" ]; then
     PROJECT_LINES="$(printf "demo-art-collector-proj\t藏家推薦系統（模擬）\ndemo-sandbox-proj\t個人練習專案（模擬）\n")"
   else
     echo "🔎 正在列出您帳號下的所有 GCP 專案，並探測哪個專案有運行中的 Cloud Run 網站..."
-    PROJECT_LINES="$(gcloud projects list --format="value(projectId,name)" --sort-by=projectId 2>/dev/null || true)"
+    PROJECT_LINES="$(lp_gcloud projects list --format="value(projectId,name)" --sort-by=projectId || true)"
   fi
   if [ -z "$PROJECT_LINES" ]; then
     echo "❌ 這個帳號下找不到任何 GCP 專案！請確認已用正確的 Google 帳號登入（gcloud auth login），或改用 --project <Project ID> 指定。"
@@ -623,7 +646,7 @@ if should_run_item 1; then
   if [ "$MODE" = "dry-run" ]; then
     BILLING_ENABLED="true"
   else
-    BILLING_ENABLED="$(gcloud beta billing projects describe "$PROJECT_ID" --format="value(billingEnabled)" 2>/dev/null || echo "false")"
+    BILLING_ENABLED="$(lp_gcloud beta billing projects describe "$PROJECT_ID" --format="value(billingEnabled)" || echo "false")"
   fi
 
   if [ "$BILLING_ENABLED" = "True" ] || [ "$BILLING_ENABLED" = "true" ]; then
@@ -666,7 +689,7 @@ if should_run_item 2; then
   if [ "$MODE" = "dry-run" ]; then
     OWNER_COUNT=2
   else
-    OWNER_LIST="$(gcloud projects get-iam-policy "$PROJECT_ID" --flatten="bindings[].members" --filter="bindings.role:roles/owner" --format="value(bindings.members)" 2>/dev/null || true)"
+    OWNER_LIST="$(lp_gcloud projects get-iam-policy "$PROJECT_ID" --flatten="bindings[].members" --filter="bindings.role:roles/owner" --format="value(bindings.members)" || true)"
     if [ -n "$OWNER_LIST" ]; then
       OWNER_COUNT="$(echo "$OWNER_LIST" | wc -l | tr -d ' ')"
     fi
@@ -875,7 +898,7 @@ if should_run_item 5 || should_run_item 6; then
     ACTIVATION_POLICY="ALWAYS"
     PRIVATE_NETWORK="projects/demo/global/networks/default"
   else
-    SQL_INSTANCE="$(gcloud sql instances list --project="$PROJECT_ID" --format="value(name)" 2>/dev/null | head -n 1 || true)"
+    SQL_INSTANCE="$(lp_gcloud sql instances list --project="$PROJECT_ID" --format="value(name)" | head -n 1 || true)"
   fi
 
   if [ -z "$SQL_INSTANCE" ]; then
@@ -883,12 +906,12 @@ if should_run_item 5 || should_run_item 6; then
     add_stage_log "| 細項 2-2 & 2-3 | Cloud SQL 資料庫防護與規格選型 | ℹ️ 尚未建立 Cloud SQL 實例，跳過 |"
   else
     if [ "$MODE" != "dry-run" ]; then
-      IPV4_ENABLED="$(gcloud sql instances describe "$SQL_INSTANCE" --project="$PROJECT_ID" --format="value(settings.ipConfiguration.ipv4Enabled)" 2>/dev/null || echo "Unknown")"
-      REQUIRE_SSL="$(gcloud sql instances describe "$SQL_INSTANCE" --project="$PROJECT_ID" --format="value(settings.ipConfiguration.requireSsl)" 2>/dev/null || echo "Unknown")"
-      BACKUP_ENABLED="$(gcloud sql instances describe "$SQL_INSTANCE" --project="$PROJECT_ID" --format="value(settings.backupConfiguration.enabled)" 2>/dev/null || echo "Unknown")"
-      CURRENT_TIER="$(gcloud sql instances describe "$SQL_INSTANCE" --project="$PROJECT_ID" --format="value(settings.tier)" 2>/dev/null || echo "Unknown")"
-      ACTIVATION_POLICY="$(gcloud sql instances describe "$SQL_INSTANCE" --project="$PROJECT_ID" --format="value(settings.activationPolicy)" 2>/dev/null || echo "Unknown")"
-      PRIVATE_NETWORK="$(gcloud sql instances describe "$SQL_INSTANCE" --project="$PROJECT_ID" --format="value(settings.ipConfiguration.privateNetwork)" 2>/dev/null || echo "Unknown")"
+      IPV4_ENABLED="$(lp_gcloud sql instances describe "$SQL_INSTANCE" --project="$PROJECT_ID" --format="value(settings.ipConfiguration.ipv4Enabled)" || echo "Unknown")"
+      REQUIRE_SSL="$(lp_gcloud sql instances describe "$SQL_INSTANCE" --project="$PROJECT_ID" --format="value(settings.ipConfiguration.requireSsl)" || echo "Unknown")"
+      BACKUP_ENABLED="$(lp_gcloud sql instances describe "$SQL_INSTANCE" --project="$PROJECT_ID" --format="value(settings.backupConfiguration.enabled)" || echo "Unknown")"
+      CURRENT_TIER="$(lp_gcloud sql instances describe "$SQL_INSTANCE" --project="$PROJECT_ID" --format="value(settings.tier)" || echo "Unknown")"
+      ACTIVATION_POLICY="$(lp_gcloud sql instances describe "$SQL_INSTANCE" --project="$PROJECT_ID" --format="value(settings.activationPolicy)" || echo "Unknown")"
+      PRIVATE_NETWORK="$(lp_gcloud sql instances describe "$SQL_INSTANCE" --project="$PROJECT_ID" --format="value(settings.ipConfiguration.privateNetwork)" || echo "Unknown")"
     fi
 
     if should_run_item 5; then
@@ -1100,7 +1123,7 @@ if should_run_item 5 || should_run_item 6; then
             # PITR 的開法依資料庫種類不同：MySQL 開二進位記錄（binlog），PostgreSQL／SQL Server 開 point-in-time-recovery
             PITR_FLAG="--enable-point-in-time-recovery"
             if [ "$MODE" != "dry-run" ]; then
-              DB_VERSION="$(gcloud sql instances describe "$SQL_INSTANCE" --project="$PROJECT_ID" --format="value(databaseVersion)" 2>/dev/null || true)"
+              DB_VERSION="$(lp_gcloud sql instances describe "$SQL_INSTANCE" --project="$PROJECT_ID" --format="value(databaseVersion)" || true)"
               [[ "$DB_VERSION" == MYSQL* ]] && PITR_FLAG="--enable-bin-log"
             fi
             apply_db_plan "4" "方案 3B：db-f1-micro (24h) + 50GB SSD + 30天 PITR 備份" 500 580 \
@@ -1148,19 +1171,19 @@ if should_run_item 7; then
     VERTEX_ENABLED="false"
   else
     # 列 API 失敗（沒權限、網路斷）時標「api-unknown」，不當成未啟用、不出啟用選單
-    if ! VERTEX_API_LIST="$(gcloud services list --enabled --project="$PROJECT_ID" --filter="config.name:aiplatform.googleapis.com" --format="value(config.name)" 2>/dev/null)"; then
+    if ! VERTEX_API_LIST="$(lp_gcloud services list --enabled --project="$PROJECT_ID" --filter="config.name:aiplatform.googleapis.com" --format="value(config.name)")"; then
       VERTEX_ENABLED="api-unknown"
     elif printf '%s\n' "$VERTEX_API_LIST" | grep -q "aiplatform.googleapis.com"; then
       VERTEX_ENABLED="true"
       # Cloud Run 預設用 Compute Engine 預設服務帳戶；Vertex 使用者／管理員角色，或涵蓋它們的 Editor／Owner 都算有授權
       # （沒有組織的專案，這個帳戶通常自動有 Editor）。查不到（沒權限讀 IAM）時另外標「未確認」，不當成沒授權。
-      PROJECT_NUM="$(gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)" 2>/dev/null || true)"
+      PROJECT_NUM="$(lp_gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)" || true)"
       VERTEX_SA=""
       [ -n "$PROJECT_NUM" ] && VERTEX_SA="${PROJECT_NUM}-compute@developer.gserviceaccount.com"
-      if [ -z "$VERTEX_SA" ] || ! VERTEX_SA_ROLES="$(gcloud projects get-iam-policy "$PROJECT_ID" \
+      if [ -z "$VERTEX_SA" ] || ! VERTEX_SA_ROLES="$(lp_gcloud projects get-iam-policy "$PROJECT_ID" \
         --flatten="bindings[].members" \
         --filter="bindings.members:serviceAccount:${VERTEX_SA}" \
-        --format="value(bindings.role)" 2>/dev/null)"; then
+        --format="value(bindings.role)")"; then
         VERTEX_ENABLED="role-unknown"
       elif ! printf '%s\n' "$VERTEX_SA_ROLES" | grep -qE '^roles/(aiplatform\.user|aiplatform\.admin|editor|owner)$'; then
         VERTEX_ENABLED="no-role"
@@ -1221,7 +1244,7 @@ if should_run_item 7; then
           if ! gcloud services enable aiplatform.googleapis.com --project="$PROJECT_ID"; then
             VERTEX_OK="false"
           else
-            PROJECT_NUM="$(gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)" 2>/dev/null || true)"
+            PROJECT_NUM="$(lp_gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)" || true)"
             if [ -z "$PROJECT_NUM" ] || ! gcloud projects add-iam-policy-binding "$PROJECT_ID" \
               --member="serviceAccount:${PROJECT_NUM}-compute@developer.gserviceaccount.com" \
               --role="roles/aiplatform.user" >/dev/null; then
@@ -1274,7 +1297,7 @@ if should_run_item 8; then
   if [ "$MODE" = "dry-run" ]; then
     SCHEDULER_ENABLED="false"
   else
-    if gcloud services list --enabled --project="$PROJECT_ID" --filter="config.name:cloudscheduler.googleapis.com" --format="value(config.name)" 2>/dev/null | grep -q "cloudscheduler.googleapis.com"; then
+    if lp_gcloud services list --enabled --project="$PROJECT_ID" --filter="config.name:cloudscheduler.googleapis.com" --format="value(config.name)" | grep -q "cloudscheduler.googleapis.com"; then
       SCHEDULER_ENABLED="true"
     fi
   fi

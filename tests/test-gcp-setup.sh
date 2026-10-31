@@ -469,5 +469,50 @@ bash "$SH" --report-problem --bogus-flag > "$S/out.txt" 2>&1; rc_is t17i2 $? 2
 chk t17i2 "不認得的選項：--bogus-flag"
 rm -rf "$S/logs"
 
+# 17j. gcloud 查現況的錯誤訊息記進紀錄（D15 (b2)）：失敗時假 gcloud 在 stderr 印一行帶電子郵件與 token 的訊息。
+#      終端機畫面不變（錯誤訊息不印）、紀錄裡有「（gcloud 錯誤）」且已遮蔽、檢查結果照舊（讀不到就標「未知」）
+GERR="ERROR: (gcloud.sql.instances.describe) PERMISSION_DENIED for bob@example.com ${K_TOKEN}=zzz98765 end"
+rm -rf "$S/logs"
+FAKE_GCLOUD_FAIL="sql instances describe" FAKE_GCLOUD_FAIL_MSG="$GERR" bash "$SH" --item 5 --project proj-a --check-only < /dev/null > "$S/out.txt" 2>&1; rc_is t17j $? 0
+LG="$(latest_log)"
+nochk t17j-term "PERMISSION_DENIED"   # 終端機畫面不變
+chk t17j-rc "目前規格: Unknown"   # 結束碼原樣交還：失敗時走原本的「|| echo Unknown」
+chk t17j-rc2 "讀不到 Cloud SQL 的公網 IP 設定"
+fchk t17j-hdr "$LG" "^（gcloud 錯誤）結束碼 1：gcloud sql instances describe db-1 --project=proj-a --format=value(settings.tier)"
+fchk t17j-msg "$LG" "^（gcloud 錯誤）ERROR: (gcloud.sql.instances.describe) PERMISSION_DENIED for <email> ${K_TOKEN}=\*\*\* end"
+fnochk t17j-mail "$LG" "bob@example.com"
+fnochk t17j-tok "$LG" "zzz98765"
+fchk t17j-foot "$LG" "^# 結束，結束碼 0"
+[ "$(grep -c '^（gcloud 錯誤）結束碼' "$LG")" = 6 ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t17j] 6 次 describe 都該各記一筆，實際 $(grep -c '^（gcloud 錯誤）結束碼' "$LG")"; }
+[ -z "$(find "$S/logs" -name '*.gcerr' 2>/dev/null)" ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t17j] 暫存的 .gcerr 檔跑完要刪掉"; }
+# 17j2. 成功但 stderr 有警告：也記（結束碼 0），沒有警告的呼叫不記；多行訊息每行都加前綴
+rm -rf "$S/logs"
+FAKE_GCLOUD_WARN_ON="projects list" FAKE_GCLOUD_WARN="WARNING: update available" bash "$SH" --stage cost --check-only < /dev/null > "$S/out.txt" 2>&1; rc_is t17j2 $? 0
+LG="$(latest_log)"
+nochk t17j2-term "update available"
+fchk t17j2-hdr "$LG" "^（gcloud 錯誤）結束碼 0：gcloud projects list"
+fchk t17j2-msg "$LG" "^（gcloud 錯誤）WARNING: update available"
+[ "$(grep -c '^（gcloud 錯誤）結束碼' "$LG")" = 1 ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t17j2] 只有 projects list 有警告，該只記 1 筆，實際 $(grep -c '^（gcloud 錯誤）結束碼' "$LG")"; }
+# 17j3. 沒有全程記錄（LAZY_PACK_LOGGING=1 直接跑內層）時照舊丟掉：不留紀錄、畫面不變、不留 .gcerr
+rm -rf "$S/logs"
+LAZY_PACK_LOGGING=1 FAKE_GCLOUD_FAIL="sql instances describe" FAKE_GCLOUD_FAIL_MSG="$GERR" bash "$SH" --item 5 --project proj-a --check-only < /dev/null > "$S/out.txt" 2>&1; rc_is t17j3 $? 0
+nochk t17j3-term "PERMISSION_DENIED"
+rc_is t17j3-n "$(logs_n)" 0
+# 17j5. 暫存的 .gcerr 寫不進去（紀錄檔所在資料夾不存在）時，gcloud 仍照常執行、結果不變，只是不記
+rm -rf "$S/logs"
+LAZY_PACK_LOGGING=1 LAZY_PACK_LOG_FILE="$S/no-such-dir/x.log" bash "$SH" --stage cost --check-only < /dev/null > "$S/out.txt" 2>&1; rc_is t17j5 $? 0
+chk t17j5 "目標 GCP 專案：proj-a"
+# 17j4. --report-problem 的回報檔把 gcloud 錯誤列在「失敗與警告的行」，並已遮蔽
+rm -rf "$S/logs"
+cp "$R/lazy-pack/"* "$RP/lazy-pack/"
+FAKE_GCLOUD_FAIL="sql instances describe" FAKE_GCLOUD_FAIL_MSG="$GERR" bash "$RPSH" --item 5 --project proj-a --check-only < /dev/null > "$S/out.txt" 2>&1
+touch "$S/rp.marker"; sleep 1
+bash "$RPSH" --report-problem > "$S/out.txt" 2>&1; rc_is t17j4 $? 0
+PR="$(find "$RP/reports" -maxdepth 1 -name 'problem-report-*.md' -newer "$S/rp.marker" | sort | tail -1)"
+fchk t17j4-hdr "$PR" "^- （gcloud 錯誤）結束碼 1：gcloud sql instances describe"
+fchk t17j4-msg "$PR" "^- （gcloud 錯誤）ERROR: (gcloud.sql.instances.describe) PERMISSION_DENIED for <email>"
+fnochk t17j4 "$PR" "bob@example.com"
+rm -rf "$S/logs"
+
 echo "PASS=$pass FAIL=$fail SKIP=$skip"
 [ "$fail" -eq 0 ] && [ "$skip" -eq 0 ]
