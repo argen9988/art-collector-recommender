@@ -21,6 +21,11 @@
 #   bash gcp-setup-and-check.sh --check-only          # 純唯讀體檢模式（只檢查與出報告，不修改任何設定）
 #   bash gcp-setup-and-check.sh --project <ID>        # 直接指定 GCP 專案（不帶時自動列出帳號下所有專案供選擇）
 #   bash gcp-setup-and-check.sh --dry-run             # 模擬測試模式（無 gcloud 環境下驗證流程、選單與報告輸出）
+#   bash gcp-setup-and-check.sh --report-problem [--note "<出了什麼狀況>"]   # 出問題時：產生問題回報檔與信件草稿（不寄出）
+#
+# 錯誤回報（D8、D15）：每次執行（--report-problem、--help 除外）都把終端機上印出的全部內容記到
+#   reports/logs/gcp-setup-and-check-<時間>.log（先遮掉金鑰、密碼、電子郵件與電腦使用者名稱；測試時用 LAZY_PACK_LOGS_DIR 指到暫存資料夾）。
+#   --report-problem 轉給 code-and-ai-audit.mjs 整理成 reports/problem-report-<時間>.md 與信件草稿，由使用者用電子郵件寄出；腳本不寄信。
 # ==============================================================================
 
 set -u
@@ -29,6 +34,132 @@ MODE="interactive"
 TARGET_STAGE="menu"
 TARGET_ITEM=""
 PROJECT_ID=""
+REPORT_PROBLEM=""
+REPORT_NOTE=""
+
+SELF="${BASH_SOURCE[0]}"
+SCRIPT_NAME="gcp-setup-and-check"
+SCRIPT_DIR="$(cd -P "$(dirname "$SELF")" && pwd -P)"
+REPO_ROOT="$(cd -P "${SCRIPT_DIR}/.." && pwd -P)"
+
+# ------------------------------------------------------------------------------
+# 錯誤回報：遮蔽、全程記錄（reports/logs/）與 --report-problem（D8、D15）
+# 遮蔽規則和 code-and-ai-audit.mjs 的 redactSecrets 同一份（寧可多遮），改一邊要改另一邊
+# ------------------------------------------------------------------------------
+
+# 家目錄的各種寫法（Git Bash 的 /c/Users/…、C:\Users\…、C:/Users/…）轉成一條不分大小寫、特殊字元跳脫的 ERE（用 | 串起來）
+# 外部程式只叫一次 awk（加上 Windows 的兩次 cygpath）：Git Bash 每開一個程式要 0.1～0.3 秒
+lp_home_ere() {
+  local hs=()
+  [ -n "${HOME:-}" ] && hs+=("$HOME")
+  [ -n "${USERPROFILE:-}" ] && hs+=("$USERPROFILE")
+  [ "${#hs[@]}" -gt 0 ] || return 0
+  {
+    printf '%s\n' "${hs[@]}"
+    if command -v cygpath >/dev/null 2>&1; then cygpath -w "${hs[@]}"; cygpath -m "${hs[@]}"; fi
+  } 2>/dev/null | awk '
+    function ere(s,   o, i, c, n) {
+      n = length(s); o = ""
+      for (i = 1; i <= n; i++) {
+        c = substr(s, i, 1)
+        if (c ~ /[A-Za-z]/) o = o "[" tolower(c) toupper(c) "]"
+        else if (index("[].*+?^$(){}|\\/#", c) > 0) o = o "\\" c
+        else o = o c
+      }
+      return o
+    }
+    function add(s) { if (length(s) > 1 && !(s in seen)) { seen[s] = 1; out = out (out == "" ? "" : "|") ere(s) } }
+    { sub(/\r$/, ""); a = $0; b = $0; c = $0; gsub(/\\/, "/", b); gsub(/\//, "\\", c); add(a); add(b); add(c) }
+    END { printf "%s", out }
+  '
+}
+
+# 遮蔽規則放進 LP_SED_ARGS（sed 的參數）；能用 -u 就用，Ctrl-C 時才不會丟掉還沒寫出的行
+lp_redact_init() {
+  local home_ere
+  home_ere="$(lp_home_ere)"
+  LP_SED_ARGS=(-E)
+  [ -n "$home_ere" ] && LP_SED_ARGS+=(-e "s#${home_ere}#<HOME>#g")
+  LP_SED_ARGS+=(
+    -e '/-----BEGIN [A-Z ]*PRIVATE KEY-----/{'
+    -e ':lpkey'
+    -e '/-----END [A-Z ]*PRIVATE KEY-----/!{'
+    -e '$!{'
+    -e 'N'
+    -e 'b lpkey'
+    -e '}'
+    -e '}'
+    -e 's#-----BEGIN [A-Z ]*PRIVATE KEY-----.*-----END [A-Z ]*PRIVATE KEY-----#<私鑰已遮蔽>#'
+    -e 's#-----BEGIN [A-Z ]*PRIVATE KEY-----.*#<私鑰已遮蔽>#'
+    -e '}'
+    -e 's#//[^/[:space:]]*@#//***@#g'
+    -e 's#AIza[0-9A-Za-z_-]{35}#AIza***#g'
+    -e 's#(^|[^0-9A-Za-z_])re_[0-9A-Za-z_]{20,}#\1re_***#g'
+    -e 's#(^|[^0-9A-Za-z_])SG\.[0-9A-Za-z_-]{20,}#\1SG.***#g'
+    -e 's#ya29\.[0-9A-Za-z_-]{20,}#ya29.***#g'
+    -e 's#eyJ[0-9A-Za-z_-]{10,}\.[0-9A-Za-z_-]{10,}\.[0-9A-Za-z_-]*#<JWT已遮蔽>#g'
+    -e 's#([Bb][Ee][Aa][Rr][Ee][Rr][[:space:]]+)[A-Za-z0-9._~+/=-]{8,}#\1***#g'
+    -e "s#(([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Pp][Ww][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Aa][Pp][Ii][_-]?[Kk][Ee][Yy]|[Pp][Rr][Ii][Vv][Aa][Tt][Ee][_-]?[Kk][Ee][Yy]|[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn])[\"']?[[:space:]]*[:=][[:space:]]*)([\"']?)[^[:space:]\"',;]+#\1\3***#g"
+    -e 's#[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}#<email>#g'
+  )
+  if sed -u -e p /dev/null >/dev/null 2>&1; then LP_SED_ARGS=(-u "${LP_SED_ARGS[@]}"); fi
+}
+
+# 標準輸入逐行遮蔽後寫到標準輸出（要先跑過 lp_redact_init）
+lp_redact() {
+  LC_ALL=C sed "${LP_SED_ARGS[@]}"
+}
+
+# 照 (a) 的格式把整支腳本再跑一次並記錄：開頭 # … 開始、結尾 # 結束，結束碼 N；記不下來（唯讀、滿了）就回傳 1，讓檢查照常跑
+lp_run_logged() {
+  local dir="${LAZY_PACK_LOGS_DIR:-${REPO_ROOT}/reports/logs}" now base file i=2 rc made
+  now="$(date '+%Y%m%d-%H%M%S|%Y-%m-%d %H:%M:%S')"
+  base="${dir}/${SCRIPT_NAME}-${now%%|*}"
+  mkdir -p "$dir" 2>/dev/null || return 1
+  file="${base}.log"
+  while [ -e "$file" ]; do file="${base}-${i}.log"; i=$((i + 1)); done
+  set -C; { : > "$file"; } 2>/dev/null; made=$?; set +C
+  [ "$made" -eq 0 ] || return 1
+  lp_redact_init
+  printf '# %s.sh 開始 %s｜參數：%s｜bash %s｜%s\n' "$SCRIPT_NAME" "${now#*|}" "$*" "${BASH_VERSION:-?}" "$(uname -sr 2>/dev/null)" | lp_redact >> "$file"
+  trap ':' INT   # Ctrl-C 只打斷裡面那支，這裡還要把結尾寫進紀錄
+  {
+    LAZY_PACK_LOGGING=1 "$BASH" "$SELF" "$@" 2>&1 | tee /dev/fd/3 | lp_redact >> "$file"
+    rc=${PIPESTATUS[0]}
+  } 3>&1
+  printf '\n# 結束，結束碼 %s\n' "$rc" >> "$file"
+  exit "$rc"
+}
+
+# --report-problem：轉給 code-and-ai-audit.mjs 產生問題回報檔與信件草稿（它會讀兩支腳本最近一次的紀錄）
+lp_report_problem() {
+  local mjs="${SCRIPT_DIR}/code-and-ai-audit.mjs" logs="${LAZY_PACK_LOGS_DIR:-${REPO_ROOT}/reports/logs}" last
+  if command -v node >/dev/null 2>&1 && [ -f "$mjs" ]; then
+    if command -v cygpath >/dev/null 2>&1; then
+      mjs="$(cygpath -m "$mjs")"
+      [ -n "${LAZY_PACK_LOGS_DIR:-}" ] && export LAZY_PACK_LOGS_DIR="$(cygpath -m "$LAZY_PACK_LOGS_DIR")"
+    fi
+    if [ -n "$REPORT_NOTE" ]; then exec node "$mjs" --report-problem --note "$REPORT_NOTE"; fi
+    exec node "$mjs" --report-problem
+  fi
+  echo "❌ 這台電腦找不到 node，沒辦法自動整理問題回報檔。"
+  last="$(ls -t "$logs"/${SCRIPT_NAME}-*.log 2>/dev/null | head -n 1)"
+  if [ -n "$last" ]; then
+    echo "   請把這個執行紀錄（金鑰、密碼、電子郵件已先遮掉）當附件，用電子郵件寄給資訊相關權責單位，並在信裡寫你做了什麼、畫面上看到什麼："
+    echo "   $last"
+  else
+    echo "   也沒有找到執行紀錄（${logs}）。請把畫面上看到的錯誤訊息整段複製，用電子郵件寄給資訊相關權責單位。"
+  fi
+  exit 1
+}
+
+if [ -z "${LAZY_PACK_LOGGING:-}" ]; then
+  lp_skip=""
+  for lp_a in "$@"; do
+    case "$lp_a" in --report-problem|-h|--help) lp_skip=1 ;; esac
+  done
+  [ -n "$lp_skip" ] || lp_run_logged "$@"   # 成功時不會回來（直接 exit）；記不下來才往下照常執行
+fi
 
 # 選項需要值：缺值或後面直接接另一個選項就結束（結束碼 2），不悄悄套用預設
 require_value() {
@@ -71,8 +202,18 @@ while [ $# -gt 0 ]; do
       require_value "${1%%=*}" "${1#*=}"
       PROJECT_ID="${1#*=}"
       ;;
+    --report-problem) REPORT_PROBLEM=1 ;;
+    --note)
+      require_value "$1" "${2:-}"
+      REPORT_NOTE="$2"
+      shift
+      ;;
+    --note=*)
+      require_value "${1%%=*}" "${1#*=}"
+      REPORT_NOTE="${1#*=}"
+      ;;
     -h|--help)
-      echo "用法: bash $0 [--stage 1|2|cost|all] [--item 1..8] [--project <Project ID>] [--check-only] [--dry-run]"
+      echo "用法: bash $0 [--stage 1|2|cost|all] [--item 1..8] [--project <Project ID>] [--check-only] [--dry-run] [--report-problem [--note <出了什麼狀況>]]"
       exit 0
       ;;
     *)
@@ -88,11 +229,12 @@ if [ -n "$TARGET_ITEM" ] && ! [[ "$TARGET_ITEM" =~ ^[1-8]$ ]]; then
   exit 2
 fi
 
+# 出問題時：整理問題回報檔與信件草稿，不跑檢查（不留自己的紀錄，它要讀的是上一次的）
+[ -n "$REPORT_PROBLEM" ] && lp_report_problem
+
 # ------------------------------------------------------------------------------
 # 0. 讀取參數檔 (config/params.json) 與報告目錄準備
 # ------------------------------------------------------------------------------
-SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-REPO_ROOT="$(cd -P "${SCRIPT_DIR}/.." && pwd -P)"
 REPORTS_DIR="${REPO_ROOT}/reports"
 STATE_FILE="${REPORTS_DIR}/.lazy-pack-state.env"
 mkdir -p "$REPORTS_DIR"

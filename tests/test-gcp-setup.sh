@@ -21,7 +21,9 @@ trap 'exit 130' INT TERM
 rm -f "$ST"   # 使用者狀態檔的舊值不能影響測試
 chmod +x "$S/fakebin/gcloud"
 export PATH="$S/fakebin:$PATH"
-pass=0; fail=0
+export LAZY_PACK_LOGS_DIR="$S/logs"   # 執行紀錄寫到暫存資料夾，不留在使用者的 reports/logs/
+unset LAZY_PACK_REPORT_TO LAZY_PACK_LOGGING
+pass=0; fail=0; skip=0
 chk() { if grep -q -- "$2" "$S/out.txt"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL [$1] 找不到: $2"; fi; }
 nochk() { if grep -q -- "$2" "$S/out.txt"; then fail=$((fail+1)); echo "FAIL [$1] 不該出現: $2"; else pass=$((pass+1)); fi; }
 chkst() { if [ -f "$ST" ] && grep -q -- "$2" "$ST"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL [$1] 狀態檔找不到: $2"; fi; }
@@ -290,5 +292,182 @@ chk t16e "usd_twd_rate 讀不到或格式不合法，這次照預設值 32.5 跑
 nochk t16e "注意：參數檔.*image_scan"   # 範圍兩端（10、1000）要收
 chk t16e "預估月費：約 NT\$325000 / 月"   # 10×1000×32.5
 
-echo "PASS=$pass FAIL=$fail"
-[ "$fail" -eq 0 ]
+# 17. 錯誤回報（D8、D15）：全程記錄到 LAZY_PACK_LOGS_DIR、遮蔽規則、--report-problem 轉給 code-and-ai-audit.mjs；紀錄與回報檔都要遮掉金鑰、密碼、電子郵件與家目錄
+logs_n() { find "$S/logs" -maxdepth 1 -name 'gcp-setup-and-check-*.log' 2>/dev/null | wc -l | tr -d ' '; }
+latest_log() { find "$S/logs" -maxdepth 1 -name 'gcp-setup-and-check-*.log' 2>/dev/null | sort | tail -1; }
+# fchk <代號> <檔案> <樣式>／fnochk：檢查檔案內容（chk 只看終端機輸出 out.txt）
+fchk() { if [ -n "$2" ] && [ -f "$2" ] && grep -q -- "$3" "$2"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL [$1] 檔案「${2:-（沒有檔案）}」找不到: $3"; fi; }
+fnochk() { if [ -n "$2" ] && [ -f "$2" ]; then if grep -q -- "$3" "$2"; then fail=$((fail+1)); echo "FAIL [$1] 不該出現: $3"; else pass=$((pass+1)); fi; else fail=$((fail+1)); echo "FAIL [$1] 沒有檔案可查「$3」"; fi; }
+mp() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
+QKEY="AIza$(head -c 35 < /dev/zero | tr '\0' 'Q')"   # 假金鑰，跑的時候才組出來
+K_PASS="pass""word"; K_TOKEN="tok""en"; K_PW="hunter""2pw"; K_APIK="api_""key"; K_PRIVK="PRIVATE""-KEY"   # 像帳密的假字串也是跑的時候才組出來（不讓帳密掃描誤判）
+KB="-----BEGIN ""PRIVATE KEY-----"; KE="-----END ""PRIVATE KEY-----"; KRB="-----BEGIN RSA ""PRIVATE KEY-----"; KRE="-----END RSA ""PRIVATE KEY-----"
+
+# 17a. 一般執行：終端機印的都記進一個新的 gcp-setup-and-check-*.log，開頭有參數與版本、結尾有結束碼；終端機畫面照舊
+rm -rf "$S/logs"
+printf "\n2\n" | bash "$SH" --stage cost --check-only > "$S/out.txt" 2>&1; rc=$?
+rc_is t17a $rc 0
+rc_is t17a-n "$(logs_n)" 1
+LG="$(latest_log)"
+fchk t17a-head "$LG" "^# gcp-setup-and-check.sh 開始 .*參數：--stage cost --check-only"
+fchk t17a-body "$LG" "目標 GCP 專案：proj-a"
+fchk t17a-foot "$LG" "^# 結束，結束碼 0"
+chk t17a "目標 GCP 專案：proj-a"
+nochk t17a "^# 結束"   # 開頭與結尾只記在紀錄裡，不印在終端機上
+# 紀錄的內容和終端機一致（只多開頭、空行、結尾三行）
+n_out="$(wc -l < "$S/out.txt" | tr -d ' ')"; n_log="$(wc -l < "$LG" | tr -d ' ')"
+rc_is t17a-lines "$n_log" "$((n_out + 3))"
+
+# 17b. 結束碼要跟著實際結果：不認得的選項是 2、--item 超出範圍是 2；--help 不留紀錄
+rm -rf "$S/logs"
+bash "$SH" --bogus-flag > "$S/out.txt" 2>&1; rc_is t17b $? 2
+chk t17b "不認得的選項：--bogus-flag"
+fchk t17b-log "$(latest_log)" "不認得的選項：--bogus-flag"
+fchk t17b-foot "$(latest_log)" "^# 結束，結束碼 2"
+rm -rf "$S/logs"
+bash "$SH" --item 9 > "$S/out.txt" 2>&1; rc_is t17b2 $? 2
+fchk t17b2-foot "$(latest_log)" "^# 結束，結束碼 2"
+rm -rf "$S/logs"
+bash "$SH" --help > "$S/out.txt" 2>&1; rc_is t17b3 $? 0
+chk t17b3 "用法"
+chk t17b3 "--report-problem"
+rc_is t17b3-n "$(logs_n)" 0
+
+# 17c. 紀錄裡遮掉金鑰、帳密、Bearer 與電子郵件（參數與畫面上印出的都要遮）；終端機上原樣不動
+rm -rf "$S/logs"
+bash "$SH" --bogus "https://bob:${K_PW}@127.0.0.1:1/x?k=$QKEY&${K_TOKEN}=zzz98765" "Bearer abcdef1234567890" "bob@example.com" > "$S/out.txt" 2>&1; rc_is t17c $? 2
+LG="$(latest_log)"
+fchk t17c-pos "$LG" "參數：--bogus https://"
+for pat in "$K_PW" "$QKEY" "zzz98765" "bob@example.com" "abcdef1234567890"; do fnochk t17c "$LG" "$pat"; done
+fchk t17c-mask "$LG" "AIza\*\*\*"
+fchk t17c-mask2 "$LG" "<email>"
+# 畫面上印出來的（不只是參數）也要遮：--project 的值會印在「目標 GCP 專案」那一行
+rm -rf "$S/logs"
+printf "\n" | bash "$SH" --project "$QKEY" --stage cost --check-only > "$S/out.txt" 2>&1; rc_is t17c2 $? 0
+chk t17c2 "目標 GCP 專案：$QKEY"
+LG="$(latest_log)"
+fchk t17c2-body "$LG" "目標 GCP 專案：AIza\*\*\*"
+fnochk t17c2 "$LG" "$QKEY"
+
+# 17d. 家目錄換成 <HOME>：假家目錄底下的路徑出現在參數與畫面上，紀錄裡要看不到家目錄名稱，終端機上照舊（Windows 的 C:/… 寫法也遮）
+FH="$S/fakehome/alice-unique-9f3"; mkdir -p "$FH"
+rm -rf "$S/logs"
+env HOME="$FH" USERPROFILE="$(mp "$FH")" bash "$SH" --bogus "$FH/proj" "$(mp "$FH")/proj2" > "$S/out.txt" 2>&1; rc_is t17d $? 2
+LG="$(latest_log)"
+fchk t17d-pos "$LG" "參數：--bogus <HOME>/proj <HOME>/proj2"
+fchk t17d-body "$LG" "不認得的選項：--bogus"
+fnochk t17d "$LG" "alice-unique-9f3"
+
+# 17e. 紀錄資料夾寫不進去（路徑被一個檔案擋住）不能擋住檢查本身，也不改寫到別處（reports/logs）
+printf 'x' > "$S/afile"
+touch "$S/run.marker"
+printf "\n2\n" | LAZY_PACK_LOGS_DIR="$S/afile/logs" bash "$SH" --stage cost --check-only > "$S/out.txt" 2>&1; rc_is t17e $? 0
+chk t17e "目標 GCP 專案：proj-a"
+[ -z "$(find "$R/reports/logs" -name '*.log' -newer "$S/run.marker" 2>/dev/null)" ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t17e] 紀錄寫不進去時不該改寫到別處（reports/logs）"; }
+
+# 17f. 遮蔽規則逐條驗證：把腳本裡的遮蔽函式抽出來，直接餵一份樣本（私鑰跨好幾行、沒結尾的私鑰、各種金鑰與帳密、不該遮的行）
+RD="$S/redact-fns.sh"
+awk '/^# 家目錄的各種寫法/{f=1} /^# 照 \(a\) 的格式/{f=0} f' "$SH" > "$RD"
+[ "$(grep -c '^lp_redact() {' "$RD")" = 1 ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t17f] 抽不出遮蔽函式"; }
+SAMPLE="$S/sample.txt"; EXPECT_DIR="$S/expect"
+{
+  echo "前面的行"
+  echo "$KB"; echo "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC"; echo "$KE"
+  echo "後面的行"
+  echo "${KRB}MIIabc${KRE}"
+  echo "https://user:${K_PW}@host.example/path"
+  echo "key $QKEY end"
+  echo "mail re_abcdefghijklmnopqrstuv end"
+  echo "mail SG.abcdefghijklmnopqrstuvwx end"
+  echo "oauth ya29.abcdefghijklmnopqrstuv end"
+  echo "jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.sig-nature end"
+  echo "Authorization: Bearer abcDEF123456+/= end"
+  echo "curl -H Bearer xyzXYZ987654+/= end"
+  echo "${K_PASS}=abc12345 和 ${K_TOKEN}: tok98765 和 \"${K_APIK}\": \"kkk11111\" 和 ${K_PRIVK} = pk22222"
+  echo "寄給 owner@corp.example 與 a.b+c@sub.example.co.uk"
+  echo "一般的行：Secret Manager 已建 3 組密鑰，網址 https://example.com/a/b?x=1"
+  echo "$KB"; echo "沒有結尾的私鑰內容ZZZ"
+} > "$SAMPLE"
+( . "$RD"; lp_redact_init; lp_redact < "$SAMPLE" > "$S/redacted.txt" )
+RO="$S/redacted.txt"
+for pat in "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC" "MIIabc" "$K_PW" "$QKEY" "abcdefghijklmnopqrstuv" "abcdefghijklmnopqrstuvwx" "sig-nature" "abcDEF123456" "xyzXYZ987654" "abc12345" "tok98765" "kkk11111" "pk22222" "owner@corp.example" "sub.example.co.uk" "沒有結尾的私鑰內容ZZZ" "123456789"; do
+  fnochk t17f "$RO" "$pat"
+done
+fchk t17f-keep1 "$RO" "^前面的行$"
+fchk t17f-keep2 "$RO" "^後面的行$"
+fchk t17f-key "$RO" "^<私鑰已遮蔽>$"
+[ "$(grep -c '<私鑰已遮蔽>' "$RO")" = 3 ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t17f] 私鑰應遮 3 處（多行、單行、沒結尾），實際 $(grep -c '<私鑰已遮蔽>' "$RO")"; }
+fchk t17f-url "$RO" "https://\*\*\*@host.example/path"
+fchk t17f-aiza "$RO" "key AIza\*\*\* end"
+fchk t17f-re "$RO" "mail re_\*\*\* end"
+fchk t17f-sg "$RO" "mail SG.\*\*\* end"
+fchk t17f-ya "$RO" "oauth ya29.\*\*\* end"
+fchk t17f-jwt "$RO" "jwt <JWT已遮蔽> end"
+fchk t17f-bearer "$RO" "curl -H Bearer \*\*\* end"
+fchk t17f-auth "$RO" "Authorization: \*\*\* \*\*\* end"
+fchk t17f-pw "$RO" "${K_PASS}=\*\*\* 和 ${K_TOKEN}: \*\*\* 和 \"${K_APIK}\": \"\*\*\*\" 和 ${K_PRIVK} = \*\*\*"
+fchk t17f-mail "$RO" "寄給 <email> 與 <email>"
+fchk t17f-plain "$RO" "^一般的行：Secret Manager 已建 3 組密鑰，網址 https://example.com/a/b?x=1$"
+
+# 17g. --report-problem：轉給 code-and-ai-audit.mjs；在複製的專案裡產生（不污染 reports/）。先用真的紀錄產生一次，再放一份比較新、含金鑰的假紀錄產生第二次
+RP="$S/rp"; mkdir -p "$RP/lazy-pack" "$RP/config" "$RP/reports"
+cp "$R/lazy-pack/"* "$RP/lazy-pack/"; cp "$R/config/params.json" "$RP/config/"
+RPSH="$RP/lazy-pack/gcp-setup-and-check.sh"
+rm -rf "$S/logs"
+printf "\n2\n" | bash "$RPSH" --stage cost --check-only > "$S/out.txt" 2>&1; rc_is t17g-pre $? 0
+rc_is t17g-n0 "$(logs_n)" 1
+export LAZY_PACK_REPORT_TO="it-desk@corp.example"
+bash "$RPSH" --report-problem --note "按 y 之後卡住 Bearer abcdef1234567890 我是 bob@example.com" > "$S/out.txt" 2>&1; rc=$?
+unset LAZY_PACK_REPORT_TO
+rc_is t17g $rc 0
+rc_is t17g-nolog "$(logs_n)" 1   # --report-problem 自己不留紀錄
+chk t17g "問題回報檔（要當附件）"
+chk t17g "不會自動寄出"
+PR="$(find "$RP/reports" -maxdepth 1 -name 'problem-report-*.md' | sort | tail -1)"
+DR="$(find "$RP/reports" -maxdepth 1 -name 'problem-email-draft-*.txt' | sort | tail -1)"
+fchk t17g-title "$PR" "^# Lazy Pack 問題回報檔"
+fchk t17g-gcp "$PR" "^### gcp-setup-and-check（紀錄檔 gcp-setup-and-check-"
+fchk t17g-head "$PR" "gcp-setup-and-check.sh 開始 .*參數：--stage cost --check-only"
+fchk t17g-foot "$PR" "結束，結束碼 0"
+fchk t17g-note "$PR" "按 y 之後卡住"
+fchk t17g-to "$DR" "^收件人：it-desk@corp.example"
+for f in "$PR" "$DR"; do
+  for pat in abcdef1234567890 bob@example.com; do fnochk t17g "$f" "$pat"; done
+done
+# 第二次：放一份比較新、沒遮過、沒有結尾的紀錄（舊版或被中斷的紀錄），回報檔產生時要再遮一次
+sleep 1
+printf '# gcp-setup-and-check.sh 開始 2026-01-01 00:00:00\n❌ 新的失敗 %s=abc12345 %s owner@corp.example\n' "$K_PASS" "$QKEY" > "$S/logs/gcp-setup-and-check-29990101-000000.log"
+bash "$RPSH" --report-problem > "$S/out.txt" 2>&1; rc_is t17g2 $? 0
+PR="$(find "$RP/reports" -maxdepth 1 -name 'problem-report-*.md' -newer "$S/logs/gcp-setup-and-check-29990101-000000.log" | sort | tail -1)"
+DR="$(find "$RP/reports" -maxdepth 1 -name 'problem-email-draft-*.txt' -newer "$S/logs/gcp-setup-and-check-29990101-000000.log" | sort | tail -1)"
+fchk t17g2-file "$PR" "gcp-setup-and-check-29990101-000000.log"
+fchk t17g2-nofoot "$PR" "沒有結束紀錄"
+fchk t17g2-problem "$PR" "^- ❌ 新的失敗"
+for f in "$PR" "$DR"; do
+  for pat in abc12345 "$QKEY" owner@corp.example; do fnochk t17g2 "$f" "$pat"; done
+done
+fchk t17g2-mask "$PR" "AIza\*\*\*"
+fchk t17g2-mask2 "$PR" "<email>"
+
+# 17h. 找不到 node 時不能當掉：印白話說明與最近一次紀錄的位置，結束碼 1
+if ( PATH=/usr/bin:/bin; command -v node >/dev/null 2>&1 ); then
+  echo "SKIP [t17h] /usr/bin:/bin 底下有 node，沒辦法模擬找不到 node"; skip=$((skip+1))
+else
+  env PATH=/usr/bin:/bin "$BASH" "$RPSH" --report-problem > "$S/out.txt" 2>&1; rc_is t17h $? 1
+  chk t17h "找不到 node"
+  chk t17h "gcp-setup-and-check-29990101-000000.log"
+  chk t17h "用電子郵件寄給資訊相關權責單位"
+  rm -rf "$S/logs"
+  env PATH=/usr/bin:/bin "$BASH" "$RPSH" --report-problem > "$S/out.txt" 2>&1; rc_is t17h2 $? 1
+  chk t17h2 "也沒有找到執行紀錄"
+fi
+
+# 17i. --note 缺值、--report-problem 搭配不認得的選項：結束碼 2
+bash "$SH" --report-problem --note > "$S/out.txt" 2>&1; rc_is t17i $? 2
+chk t17i "選項 --note 需要接一個值"
+bash "$SH" --report-problem --bogus-flag > "$S/out.txt" 2>&1; rc_is t17i2 $? 2
+chk t17i2 "不認得的選項：--bogus-flag"
+rm -rf "$S/logs"
+
+echo "PASS=$pass FAIL=$fail SKIP=$skip"
+[ "$fail" -eq 0 ] && [ "$skip" -eq 0 ]
