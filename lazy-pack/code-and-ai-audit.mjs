@@ -22,6 +22,13 @@
  *   node lazy-pack/code-and-ai-audit.mjs --web-check --url "<Cloud Run 網址>" [--observatory]            # 只跑 3-3 網址預檢＋3-4 MDN Observatory
  *   node lazy-pack/code-and-ai-audit.mjs --image-scan [--enable-image-scan] [--scan-now]                 # 只跑 3-5 Artifact Analysis 映像檔漏洞掃描
  *
+ *   node lazy-pack/code-and-ai-audit.mjs --report-problem [--note "<出了什麼狀況>"]                        # 出問題時：產生問題回報檔與信件草稿（不寄出）
+ *
+ * 錯誤回報（D8、D15）：每次執行（--report-problem 除外）都把終端機上印出的全部內容記到 reports/logs/code-and-ai-audit-<時間>.log；
+ *   --report-problem 把兩支腳本最近一次的紀錄、環境（版本、作業系統、node、gcloud）與各階段最後狀態整理成 reports/problem-report-<時間>.md，
+ *   另寫 reports/problem-email-draft-<時間>.txt（主旨與內文）；都先遮掉金鑰、密碼、電子郵件與電腦使用者名稱，由使用者用電子郵件寄給資訊相關權責單位。
+ *   收件人信箱不寫進程式（這個 repo 是公開的），設環境變數 LAZY_PACK_REPORT_TO 會自動帶入草稿；測試時用 LAZY_PACK_LOGS_DIR 把紀錄指到暫存資料夾
+ *
  * 細項 3-3／3-4（--web-check 或 --run-ai-eval 時跑；網址的取得順序同 3-2；--mock、--self-test 不連網）：
  *   3-3 用 node 內建的 fetch 與 tls 看 HSTS、Cookie 的 Secure／HttpOnly、CORS、TLS 1.0／1.1、錯誤頁有沒有露出版本
  *   3-4 只把主機名稱送給 MDN HTTP Observatory（不需金鑰；掃描紀錄任何人都查得到，所以要 --observatory 或在終端機回答 y 才送；
@@ -1455,13 +1462,193 @@ async function resolveTarget(cliArgs) {
 }
 
 // -----------------------------------------------------------------------------
+// 錯誤回報：全程記錄（reports/logs/）與 --report-problem 問題回報檔（D8、D15）
+// 紀錄與回報檔都先遮掉金鑰、密碼、電子郵件與電腦使用者名稱；腳本不會自己寄信，回報檔由使用者用電子郵件寄出
+// -----------------------------------------------------------------------------
+const SCRIPT_NAME = 'code-and-ai-audit';
+const LOG_SCRIPTS = ['gcp-setup-and-check', SCRIPT_NAME]; // 問題回報檔收這兩支腳本最近一次的紀錄
+const LOGS_DIR = process.env.LAZY_PACK_LOGS_DIR || path.join(REPORTS_DIR, 'logs'); // 測試時指到暫存資料夾
+const LOG_TAIL_LINES = 150;
+const LOG_PROBLEM_LINES = 40;
+
+function nowStamp() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const day = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
+  return {
+    ts: `${day}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`,
+    human: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`,
+  };
+}
+
+// 寫進紀錄與回報檔前的遮蔽：寧可多遮，也不讓金鑰、密碼、個資離開這台電腦
+function redactSecrets(text) {
+  let t = String(text);
+  const home = os.homedir();
+  if (home) {
+    const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // 家目錄的反斜線、正斜線兩種寫法都要遮（環境變數給的寫法跟 path.resolve 印出來的不一定一樣）
+    t = t.replace(new RegExp([home, home.replace(/\//g, '\\'), home.replace(/\\/g, '/')].map(esc).join('|'), 'gi'), '<HOME>');
+  }
+  return t
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, '<私鑰已遮蔽>')
+    .replace(/\/\/[^/\s]*@/g, '//***@')
+    .replace(/AIza[0-9A-Za-z_-]{35}/g, 'AIza***')
+    .replace(/\bre_[0-9A-Za-z_]{20,}/g, 're_***')
+    .replace(/\bSG\.[0-9A-Za-z_-]{20,}/g, 'SG.***')
+    .replace(/ya29\.[0-9A-Za-z_-]{20,}/g, 'ya29.***')
+    .replace(/eyJ[0-9A-Za-z_-]{10,}\.[0-9A-Za-z_-]{10,}\.[0-9A-Za-z_-]*/g, '<JWT已遮蔽>')
+    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, '$1***')
+    .replace(/((?:password|passwd|pwd|secret|token|api[_-]?key|private[_-]?key|authorization)["']?\s*[:=]\s*)(["']?)[^\s"',;]+/gi, '$1$2***')
+    .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g, '<email>');
+}
+
+// 把這次執行印在終端機的全部內容（含錯誤）同步記一份到 reports/logs/<腳本>-<時間>.log；記不下來（唯讀、滿了）不能擋住檢查本身
+function startRunLog(argv) {
+  let fd;
+  try {
+    fs.mkdirSync(LOGS_DIR, { recursive: true });
+    const base = path.join(LOGS_DIR, `${SCRIPT_NAME}-${nowStamp().ts}`);
+    let file = `${base}.log`;
+    for (let i = 2; fs.existsSync(file); i++) file = `${base}-${i}.log`;
+    fd = fs.openSync(file, 'wx');
+  } catch {
+    return;
+  }
+  const write = (chunk) => {
+    try {
+      fs.writeSync(fd, redactSecrets(Buffer.isBuffer(chunk) ? chunk.toString('utf-8') : chunk));
+    } catch { /* 記不下來就算了 */ }
+  };
+  for (const stream of [process.stdout, process.stderr]) {
+    const orig = stream.write.bind(stream);
+    stream.write = (chunk, ...rest) => {
+      if (typeof chunk === 'string' || Buffer.isBuffer(chunk)) write(chunk);
+      return orig(chunk, ...rest);
+    };
+  }
+  write(`# ${SCRIPT_NAME}.mjs 開始 ${nowStamp().human}｜參數：${argv.join(' ')}｜node ${process.version}｜${process.platform} ${os.release()}\n`);
+  // 未預期的錯誤也要進紀錄（Node 預設的錯誤輸出不一定經過上面的 write）
+  process.on('uncaughtException', (err) => {
+    console.error(`❌ 腳本發生未預期的錯誤：${(err && err.stack) || err}`);
+    process.exit(1);
+  });
+  process.on('exit', (code) => write(`\n# 結束，結束碼 ${code}\n`));
+}
+
+// 某支腳本最近一次的紀錄，整理成問題回報檔的一節
+function problemLogSection(script) {
+  let files = [];
+  try {
+    files = fs.readdirSync(LOGS_DIR)
+      .filter((n) => n.startsWith(`${script}-`) && n.endsWith('.log'))
+      .map((n) => ({ n, m: fs.statSync(path.join(LOGS_DIR, n)).mtimeMs }))
+      .sort((a, b) => b.m - a.m || (a.n < b.n ? 1 : -1));
+  } catch { /* 沒有紀錄資料夾 */ }
+  if (!files.length) return `### ${script}\n\n沒有找到執行紀錄（還沒跑過，或紀錄資料夾被清掉）。\n`;
+  const lines = redactSecrets(fs.readFileSync(path.join(LOGS_DIR, files[0].n), 'utf-8')).split(/\r?\n/);
+  const header = lines.find((l) => l.startsWith('# ') && l.includes('開始')) || '（沒有開始紀錄）';
+  const footer = lines.find((l) => l.startsWith('# 結束')) || '# （沒有結束紀錄：執行中途被中斷，或當掉）';
+  const probs = [...new Set(lines.filter((l) => /❌|⚠|Traceback|Error:/.test(l)).map((l) => l.trim()))].slice(0, LOG_PROBLEM_LINES);
+  const tail = lines.slice(-LOG_TAIL_LINES).join('\n');
+  return [
+    `### ${script}（紀錄檔 ${files[0].n}）`,
+    '',
+    `- ${header.replace(/^# /, '')}`,
+    `- ${footer.replace(/^# /, '')}`,
+    '',
+    `**失敗與警告的行**（最多 ${LOG_PROBLEM_LINES} 行）：`,
+    '',
+    probs.length ? probs.map((l) => `- ${l}`).join('\n') : '- 沒有 ❌ 或 ⚠️ 的行',
+    '',
+    `**紀錄最後 ${LOG_TAIL_LINES} 行**：`,
+    '',
+    '~~~~',
+    tail,
+    '~~~~',
+    '',
+  ].join('\n');
+}
+
+// --report-problem：寫 reports/problem-report-<時間>.md（附件）與 reports/problem-email-draft-<時間>.txt（信件主旨與內文），不寄出
+function writeProblemReport(note) {
+  const { ts, human } = nowStamp();
+  const gc = runCmd('gcloud', ['--version']);
+  const gitVer = runCmd('git', ['rev-parse', '--short', 'HEAD'], { cwd: REPO_ROOT });
+  const state = parseEnvState(STATE_FILE);
+  const stateLines = ['STAGE1_LAST_RUN', 'STAGE1_SUMMARY', 'STAGE2_LAST_RUN', 'STAGE2_SUMMARY', 'STAGE3_LAST_RUN', 'STAGE3_SUMMARY', 'SAVED_PROJECT_ID', 'SAVED_CLOUD_RUN_SERVICE', 'SAVED_CLOUD_RUN_URL']
+    .filter((k) => state[k] !== undefined && state[k] !== '')
+    .map((k) => `- ${k}：${state[k]}`);
+  const body = [
+    '# Lazy Pack 問題回報檔',
+    '',
+    `產生時間：${human}｜由 ${SCRIPT_NAME}.mjs --report-problem 產生`,
+    '',
+    '> 這份檔案已自動遮掉金鑰、密碼、電子郵件與電腦使用者名稱，但寄出前請自己再看一遍；有不想給人看的內容就刪掉那幾行。',
+    '',
+    '## 狀況說明（回報人填）',
+    '',
+    note || '（請寫：你做了什麼、畫面上看到什麼）',
+    '',
+    '## 環境',
+    '',
+    `- Lazy Pack 版本（git）：${gitVer.ok && gitVer.stdout ? gitVer.stdout : '不是 git 複本，查不到'}`,
+    `- 作業系統：${os.type()} ${os.release()} ${os.arch()}`,
+    `- node：${process.version}`,
+    `- gcloud：${gc.ok ? gc.stdout.split(/\r?\n/)[0] : '沒有裝或叫不起來'}`,
+    '',
+    '## 各階段最後狀態（reports/.lazy-pack-state.env）',
+    '',
+    stateLines.length ? stateLines.join('\n') : '- 沒有狀態檔（還沒跑過第一階段）',
+    '',
+    '## 執行紀錄',
+    '',
+    ...LOG_SCRIPTS.map(problemLogSection),
+  ].join('\n');
+  const reportPath = path.join(REPORTS_DIR, `problem-report-${ts}.md`);
+  fs.mkdirSync(REPORTS_DIR, { recursive: true });
+  fs.writeFileSync(reportPath, redactSecrets(body), 'utf-8');
+
+  const to = process.env.LAZY_PACK_REPORT_TO || '（請填資訊相關權責單位的信箱；設環境變數 LAZY_PACK_REPORT_TO 就會自動帶入）';
+  const subject = `【Lazy Pack 問題回報】藏家推薦系統雲端資安檢查出現問題（${human}）`;
+  const mailBody = [
+    '您好，',
+    '',
+    `我在執行「藏家推薦系統雲端資安檢查懶人包（Lazy Pack）」時遇到問題，附上問題回報檔（${path.basename(reportPath)}），請協助看看。`,
+    '',
+    `狀況說明：${note ? redactSecrets(note) : '（請補充：我做了什麼、畫面上看到什麼）'}`,
+    '',
+    '附件已自動遮掉金鑰、密碼、電子郵件與電腦使用者名稱。',
+    '',
+    '謝謝',
+  ].join('\n');
+  const draftPath = path.join(REPORTS_DIR, `problem-email-draft-${ts}.txt`);
+  fs.writeFileSync(draftPath, `收件人：${to}\n主旨：${subject}\n附件：${reportPath}\n\n${mailBody}\n`, 'utf-8');
+
+  console.log('==============================================================================');
+  console.log(' 🧾 問題回報檔已產生（不會自動寄出，資料不離開這台電腦，由您用電子郵件寄出）');
+  console.log('==============================================================================');
+  console.log(` • 問題回報檔（要當附件）：${reportPath}`);
+  console.log(` • 信件草稿（主旨與內文）：${draftPath}`);
+  console.log('');
+  console.log(' ✉️ 請這樣寄出：');
+  console.log(`   1. 開一封新信，收件人：${to}`);
+  console.log(`   2. 主旨：${subject}`);
+  console.log(`   3. 附件：${path.basename(reportPath)}（位置見上面）`);
+  console.log('   4. 內文可複製草稿檔裡的文字，再補上您做了什麼、看到什麼');
+  console.log('------------------------------------------------------------------------------');
+}
+
+// -----------------------------------------------------------------------------
 // 主程式入口（一開始先說明互動方式與本階段工作項目）
 // -----------------------------------------------------------------------------
 const args = process.argv.slice(2);
+const reportMode = args.includes('--report-problem');
+if (!reportMode) startRunLog(args); // --report-problem 自己不留紀錄（它要讀的是上一次的紀錄）
 {
-  // 不認得的選項、--target／--source／--repo 缺值：直接結束碼 2（--url 缺值由 3-2 與 3-3／3-4 自己判斷，--api-path 缺值由 3-2 判斷，帶 --mock 時可略過；--api-path 只給 3-2 用）
-  const FLAGS = new Set(['--self-test', '--scan-only', '--eval-only', '--run-ai-eval', '--web-check', '--observatory', '--image-scan', '--enable-image-scan', '--scan-now', '--mock', '--target', '--source', '--repo', '--url', '--api-path']);
-  const NEED_VALUE = ['--target', '--source', '--repo'];
+  // 不認得的選項、--target／--source／--repo／--note 缺值：直接結束碼 2（--url 缺值由 3-2 與 3-3／3-4 自己判斷，--api-path 缺值由 3-2 判斷，帶 --mock 時可略過；--api-path 只給 3-2 用）
+  const FLAGS = new Set(['--self-test', '--scan-only', '--eval-only', '--run-ai-eval', '--web-check', '--observatory', '--image-scan', '--enable-image-scan', '--scan-now', '--mock', '--target', '--source', '--repo', '--url', '--api-path', '--report-problem', '--note']);
+  const NEED_VALUE = ['--target', '--source', '--repo', '--note'];
   const bad = args.find((a) => a.startsWith('--') && !FLAGS.has(a));
   if (bad) {
     console.log(`❌ 不認得的選項：${bad}。可用：${[...FLAGS].join(' ')}`);
@@ -1474,6 +1661,11 @@ const args = process.argv.slice(2);
       process.exit(2);
     }
   }
+}
+if (reportMode) {
+  const i = args.indexOf('--note');
+  writeProblemReport(i === -1 ? '' : args[i + 1]);
+  process.exit(0);
 }
 const isSelfTest = args.includes('--self-test');
 const scanOnly = args.includes('--scan-only');

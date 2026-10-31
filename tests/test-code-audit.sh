@@ -18,10 +18,11 @@ touch "$S/start.marker"
 # 中途被中斷（Ctrl-C）也要還原使用者的狀態檔、關掉假伺服器、清暫存
 cleanup() {
   [ -n "${SRV:-}" ] && { kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; }
+  [ -d "$ST" ] && rmdir "$ST" 2>/dev/null   # 第 12 段會暫時把狀態檔換成資料夾（逼出讀檔錯誤），中斷時還原
   if [ -f "$S/state.bak" ]; then cp "$S/state.bak" "$ST"; else rm -f "$ST"; fi
   if [ -f "$S/full.bak" ]; then cp "$S/full.bak" "$FULL"; else rm -f "$FULL"; fi
   if [ -f "$S/findings.bak" ]; then cp "$S/findings.bak" "$FND"; else rm -f "$FND"; fi
-  find "$R/reports" -maxdepth 1 -name 'stage-*-report-*.md' -newer "$S/start.marker" -delete 2>/dev/null
+  find "$R/reports" -maxdepth 1 \( -name 'stage-*-report-*.md' -o -name 'problem-report-*.md' -o -name 'problem-email-draft-*.txt' \) -newer "$S/start.marker" -delete 2>/dev/null
   rm -rf "${S:?}"
 }
 trap cleanup EXIT
@@ -36,6 +37,7 @@ export PATH="$S/fakebin:$PATH"
 mp() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
 DL=':'; command -v cygpath >/dev/null 2>&1 && DL=';'
 export LAZY_PACK_SOURCES_DIR="$(mp "$S/sources")"
+export LAZY_PACK_LOGS_DIR="$(mp "$S/logs")"   # 執行紀錄寫到暫存資料夾，不留在使用者的 reports/logs/
 export LAZY_PACK_SEARCH_DIRS="$(mp "$S/none")"
 export GIT_CONFIG_GLOBAL="$S/empty.gitconfig" GIT_CONFIG_NOSYSTEM=1; : > "$GIT_CONFIG_GLOBAL"
 pass=0; fail=0; skip=0
@@ -701,6 +703,132 @@ run --eval-only --mock --scan-now < /dev/null; rc_is t11k $? 0
 chk t11k "--enable-image-scan、--scan-now 要搭配 --image-scan 或 --run-ai-eval 才會跑 3-5，這次沒有作用"
 unset FAKE_GCLOUD_LOG
 rm -f "$ST"
+
+# 12. 錯誤回報（D8、D15）：全程記錄到 LAZY_PACK_LOGS_DIR、--report-problem 產生問題回報檔與信件草稿；紀錄與回報檔都要遮掉金鑰、密碼、電子郵件與家目錄
+logs_n() { find "$S/logs" -maxdepth 1 -name "$1-*.log" 2>/dev/null | wc -l | tr -d ' '; }
+latest_log() { find "$S/logs" -maxdepth 1 -name "$1-*.log" -newer "$S/run.marker" 2>/dev/null | sort | tail -1; }
+latest_prob() { find "$R/reports" -maxdepth 1 -name 'problem-report-*.md' -newer "$S/run.marker" | sort | tail -1; }
+latest_draft() { find "$R/reports" -maxdepth 1 -name 'problem-email-draft-*.txt' -newer "$S/run.marker" | sort | tail -1; }
+# fchk <代號> <檔案> <樣式>／fnochk：檢查檔案內容（run 的 chk 只看終端機輸出）
+fchk() { if [ -n "$2" ] && grep -q -- "$3" "$2"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL [$1] 檔案「${2:-（沒有檔案）}」找不到: $3"; fi; }
+fnochk() { if [ -n "$2" ] && [ -f "$2" ]; then if grep -q -- "$3" "$2"; then fail=$((fail+1)); echo "FAIL [$1] 不該出現: $3"; else pass=$((pass+1)); fi; else fail=$((fail+1)); echo "FAIL [$1] 沒有檔案可查「$3」"; fi; }
+QKEY="AIza$(head -c 35 < /dev/zero | tr '\0' 'Q')"   # 假金鑰，跑的時候才組出來
+K_PASS="pass""word"; K_TOKEN="tok""en"; K_PW="hunter""2pw"   # 像帳密的假字串也是跑的時候才組出來（不讓帳密掃描誤判）
+
+# 12a. 一般執行：終端機印的都記進一個新的 code-and-ai-audit-*.log，開頭有參數與版本、結尾有結束碼
+rm -rf "$S/logs"; rm -f "$ST"
+run --self-test; rc_is t12a $? 0
+rc_is t12a-n "$(logs_n code-and-ai-audit)" 1
+LG="$(latest_log code-and-ai-audit)"
+fchk t12a-head "$LG" "^# code-and-ai-audit.mjs 開始 .*參數：--self-test"
+fchk t12a-body "$LG" "Self-Test 驗證通過"
+fchk t12a-foot "$LG" "^# 結束，結束碼 0"
+# 結束碼要跟著實際結果：不認得的選項是 2
+run --bogus-flag; rc_is t12a2 $? 2
+LG2="$(find "$S/logs" -maxdepth 1 -name 'code-and-ai-audit-*.log' -newer "$S/run.marker" | sort | tail -1)"
+fchk t12a2 "$LG2" "不認得的選項：--bogus-flag"
+fchk t12a2-foot "$LG2" "^# 結束，結束碼 2"
+
+# 12b. 紀錄裡遮掉網址的帳密、金鑰、Bearer 與電子郵件（參數會被記在開頭）；終端機上原樣不動
+run --self-test --url "https://bob:${K_PW}@127.0.0.1:1/x?k=$QKEY&t=Bearer-abcdef1234567890" --note "${K_TOKEN}=zzz98765 bob@example.com"
+LG="$(latest_log code-and-ai-audit)"
+fchk t12b-pos "$LG" "參數：--self-test --url"
+fnochk t12b "$LG" "hunter2pw"
+fnochk t12b "$LG" "$QKEY"
+fnochk t12b "$LG" "zzz98765"
+fnochk t12b "$LG" "bob@example.com"
+fchk t12b-mask "$LG" "AIza\*\*\*"
+fchk t12b-mask2 "$LG" "<email>"
+
+# 12c. 家目錄換成 <HOME>：掃描目標印出的路徑在假家目錄底下，紀錄裡要看不到家目錄名稱，終端機上照舊
+FH="$S/fakehome/alice-unique-9f3"; mkdir -p "$FH"; cp -r "$FIX" "$FH/proj"
+touch "$S/run.marker"
+env HOME="$(mp "$FH")" USERPROFILE="$(mp "$FH")" node "$MJS" --target "$(mp "$FH/proj")" --scan-only > "$S/out.txt" 2>&1; rc_is t12c $? 0
+chk t12c "alice-unique-9f3"
+LG="$(latest_log code-and-ai-audit)"
+fchk t12c-pos "$LG" "掃描目標：<HOME>"
+fnochk t12c "$LG" "alice-unique-9f3"
+
+# 12d. 未預期的錯誤（狀態檔變成資料夾，讀的時候丟例外）也要進紀錄，結束碼 1
+rm -f "$ST"; mkdir "$ST"
+run --eval-only --mock; rc_is t12d $? 1
+rmdir "$ST"
+chk t12d "腳本發生未預期的錯誤"
+LG="$(latest_log code-and-ai-audit)"
+fchk t12d-log "$LG" "腳本發生未預期的錯誤.*EISDIR"
+fchk t12d-foot "$LG" "^# 結束，結束碼 1"
+
+# 12e. 紀錄資料夾寫不進去（路徑被一個檔案擋住）不能擋住檢查本身
+printf 'x' > "$S/afile"
+touch "$S/run.marker"
+LAZY_PACK_LOGS_DIR="$(mp "$S")/afile/logs" node "$MJS" --self-test > "$S/out.txt" 2>&1; rc_is t12e $? 0
+chk t12e "Self-Test 驗證通過"
+[ -z "$(find "$R/reports/logs" -name '*.log' -newer "$S/run.marker" 2>/dev/null)" ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t12e] 紀錄寫不進去時不該改寫到別處（reports/logs）"; }
+
+# 12f. --report-problem：先放一份假的 gcp 紀錄（含金鑰、密碼、電子郵件），再產生回報檔
+rm -f "$ST"; rm -rf "$S/logs"; mkdir -p "$S/logs"
+printf '# gcp-setup-and-check.sh 開始 2026-01-01 00:00:00\n正常的一行\n❌ 設定失敗 %s=abc12345 %s owner@corp.example\n⚠️ 警告的一行\n' "$K_PASS" "$QKEY" > "$S/logs/gcp-setup-and-check-20260101-000000.log"
+run --self-test; rc_is t12f-pre $? 0
+BEFORE="$(logs_n code-and-ai-audit)"
+export LAZY_PACK_REPORT_TO="it-desk@corp.example"
+run --report-problem --note "按 y 之後卡住 Bearer abcdef1234567890 我是 bob@example.com"; rc_is t12f $? 0
+unset LAZY_PACK_REPORT_TO
+rc_is t12f-nolog "$(logs_n code-and-ai-audit)" "$BEFORE"   # --report-problem 自己不留紀錄
+chk t12f "問題回報檔（要當附件）"
+chk t12f "不會自動寄出"
+chk t12f "主旨：【Lazy Pack 問題回報】"
+PR="$(latest_prob)"; DR="$(latest_draft)"
+fchk t12f-title "$PR" "^# Lazy Pack 問題回報檔"
+fchk t12f-env "$PR" "^- node：v"
+fchk t12f-env2 "$PR" "^- 作業系統："
+fchk t12f-env3 "$PR" "^- Lazy Pack 版本（git）："
+fchk t12f-gcp "$PR" "^### gcp-setup-and-check（紀錄檔 gcp-setup-and-check-20260101-000000.log）"
+fchk t12f-nofoot "$PR" "沒有結束紀錄"
+fchk t12f-problem "$PR" "^- ❌ 設定失敗"
+fchk t12f-problem2 "$PR" "^- ⚠️ 警告的一行"
+fchk t12f-code "$PR" "^### code-and-ai-audit（紀錄檔 code-and-ai-audit-"
+fchk t12f-codefoot "$PR" "結束碼 0"
+fchk t12f-note "$PR" "按 y 之後卡住"
+for f in "$PR" "$DR"; do
+  fnochk t12f "$f" "abc12345"
+  fnochk t12f "$f" "$QKEY"
+  fnochk t12f "$f" "abcdef1234567890"
+  fnochk t12f "$f" "bob@example.com"
+  fnochk t12f "$f" "owner@corp.example"
+done
+fchk t12f-mask "$PR" "AIza\*\*\*"
+fchk t12f-mask2 "$PR" "<email>"
+fchk t12f-to "$DR" "^收件人：it-desk@corp.example"
+fchk t12f-sub "$DR" "^主旨：【Lazy Pack 問題回報】"
+fchk t12f-att "$DR" "^附件：.*problem-report-"
+fchk t12f-body "$DR" "按 y 之後卡住"
+
+# 12g. 沒設 LAZY_PACK_REPORT_TO：草稿的收件人欄提示要自己填；沒有任何紀錄資料夾也能產生
+rm -rf "$S/logs"
+unset LAZY_PACK_REPORT_TO
+run --report-problem; rc_is t12g $? 0
+PR="$(latest_prob)"; DR="$(latest_draft)"
+fchk t12g-to "$DR" "^收件人：（請填資訊相關權責單位的信箱"
+fchk t12g-note "$DR" "請補充：我做了什麼"
+fchk t12g-nolog "$PR" "沒有找到執行紀錄"
+fchk t12g-note2 "$PR" "請寫：你做了什麼"
+
+# 12h. 兩份紀錄時取最近修改的那份
+mkdir -p "$S/logs"
+printf '# code-and-ai-audit.mjs 開始 舊\nOLDLOG\n' > "$S/logs/code-and-ai-audit-20260101-000000.log"
+printf '# code-and-ai-audit.mjs 開始 新\nNEWLOG\n' > "$S/logs/code-and-ai-audit-20250101-000000.log"
+touch -d '2026-01-01 00:00:00' "$S/logs/code-and-ai-audit-20260101-000000.log" 2>/dev/null || touch -t 202601010000 "$S/logs/code-and-ai-audit-20260101-000000.log"
+run --report-problem; rc_is t12h $? 0
+PR="$(latest_prob)"
+fchk t12h-new "$PR" "NEWLOG"
+fnochk t12h "$PR" "OLDLOG"
+
+# 12i. --note 缺值、--report-problem 搭配不認得的選項：結束碼 2
+run --report-problem --note; rc_is t12i $? 2
+chk t12i "--note 後面要接值"
+run --report-problem --bogus-flag; rc_is t12i2 $? 2
+chk t12i2 "不認得的選項：--bogus-flag"
+rm -rf "$S/logs"; rm -f "$ST"
 
 echo "PASS=$pass FAIL=$fail SKIP=$skip"
 [ "$fail" -eq 0 ] && [ "$skip" -eq 0 ]

@@ -15,7 +15,7 @@
 - **自動化懶人包（Lazy Pack）與跨 AI 領航指南**：
   - 跨 AI 自動代操指南（`AGENT_SETUP_雲端資安設定與驗收指南.md`）：仿照 `ai-agent-ep04` 領航格式，供無資訊背景使用者將檔案或 GitHub 網址直接交給任何 AI Agent（Claude Code／ChatGPT App & Codex／Antigravity 2／Cursor／OpenCode）全程代操電腦完成三階段檢查、設定、費用精算與報告產出（見 D6）。
   - 雲端分階段設定、體檢與費用精算（`lazy-pack/gcp-setup-and-check.sh`）：Bash 腳本，支援 `--stage 1|2|cost|all` 與 `--item 1..8` 分階段或挑單一細項執行（不押特定日期）；不帶 `--project` 時列出帳號下所有 GCP 專案供選擇，並探測、記下藏家推薦系統的 Cloud Run 網址（`reports/.lazy-pack-state.env` 的 `SAVED_CLOUD_RUN_URL`）；每個細項執行前先展示「6 點白話說明卡」並允許自由選做或跳過；細項 1-3 將「每月預算金額」與「AI 每日呼叫上限」設計為帶數值影響說明之互動問答題（預設原值 1,000）；內建「💰 雲端服務開啟清單與每月費用精算器」；每次執行自動輸出「單次階段執行報告」並更新「全部執行累計總報告（`reports/full-execution-report.md`）」（見 D3、D4、D5、D6）。
-  - 本機程式碼掃描與 AI 紅隊測試（`lazy-pack/code-and-ai-audit.mjs`）：Node.js ESM 腳本，讀取 `config/params.json`；不帶 `--target` 時不掃自己，出「原始碼在哪裡」選單（[A] 雲端 Cloud Build 原始碼／AI Studio 下載引導、[B] GitHub clone、[C] 搜尋本機下載與桌面的資料夾與 ZIP，`--source`、`--repo` 可跳過選單，抓下來的放 `reports/sources/`），`--target` 指到 Lazy Pack 自己、不存在或沒有程式碼檔時結束碼 2；支援細項自由選擇（`--scan-only`、`--eval-only`、`--run-ai-eval`），執行靜態金鑰掃描與 20 題 LLM-as-a-Judge 推薦品質/防注入/EDM 收件人隱私驗收；20 題的測試對象依序為 `--url`、狀態檔的 `SAVED_CLOUD_RUN_URL`、本機模擬回應（`--mock`、`--self-test` 一律模擬），線上端點的路徑與格式是假設的約定（預設 `POST /api/recommend`，`--api-path` 可改，要登入時用環境變數 `LAZY_PACK_API_TOKEN`，約定寫在腳本開頭註解），有網址時（`--web-check` 只跑這兩項、`--run-ai-eval` 全跑）再做 3-3 網址預檢（node 內建 fetch 與 tls 看 HSTS、Cookie 旗標、CORS、TLS 1.0／1.1、錯誤頁露出版本）與 3-4 MDN HTTP Observatory（只送主機名稱、掃描紀錄公開，要 `--observatory` 或在終端機回答 y 才送，管線的回答不算同意），結果照弱掃專案的共同格式寫進 `reports/findings.json`（D10、D11、D12；連不上網站時不改寫、也不送 Observatory，本機與內網網址不送 Observatory）；並自動輸出第三階段單次報告與更新全部執行累計總報告（見 D4、D6）。
+  - 本機程式碼掃描與 AI 紅隊測試（`lazy-pack/code-and-ai-audit.mjs`）：Node.js ESM 腳本，讀取 `config/params.json`；不帶 `--target` 時不掃自己，出「原始碼在哪裡」選單（[A] 雲端 Cloud Build 原始碼／AI Studio 下載引導、[B] GitHub clone、[C] 搜尋本機下載與桌面的資料夾與 ZIP，`--source`、`--repo` 可跳過選單，抓下來的放 `reports/sources/`），`--target` 指到 Lazy Pack 自己、不存在或沒有程式碼檔時結束碼 2；支援細項自由選擇（`--scan-only`、`--eval-only`、`--run-ai-eval`），執行靜態金鑰掃描與 20 題 LLM-as-a-Judge 推薦品質/防注入/EDM 收件人隱私驗收；20 題的測試對象依序為 `--url`、狀態檔的 `SAVED_CLOUD_RUN_URL`、本機模擬回應（`--mock`、`--self-test` 一律模擬），線上端點的路徑與格式是假設的約定（預設 `POST /api/recommend`，`--api-path` 可改，要登入時用環境變數 `LAZY_PACK_API_TOKEN`，約定寫在腳本開頭註解），有網址時（`--web-check` 只跑這兩項、`--run-ai-eval` 全跑）再做 3-3 網址預檢（node 內建 fetch 與 tls 看 HSTS、Cookie 旗標、CORS、TLS 1.0／1.1、錯誤頁露出版本）與 3-4 MDN HTTP Observatory（只送主機名稱、掃描紀錄公開，要 `--observatory` 或在終端機回答 y 才送，管線的回答不算同意），結果照弱掃專案的共同格式寫進 `reports/findings.json`（D10、D11、D12；連不上網站時不改寫、也不送 Observatory，本機與內網網址不送 Observatory）；並自動輸出第三階段單次報告與更新全部執行累計總報告（見 D4、D6）。出問題時的回報（D8、D15）：每次執行把終端機印的全部內容記到 `reports/logs/code-and-ai-audit-<時間>.log`；`--report-problem [--note "<狀況>"]` 把兩支腳本最近一次的紀錄、環境與各階段最後狀態整理成 `reports/problem-report-<時間>.md`，另寫信件草稿 `reports/problem-email-draft-<時間>.txt`（資訊相關權責單位用電子郵件收；腳本不寄信，收件人信箱不寫進程式，設環境變數 `LAZY_PACK_REPORT_TO` 帶入草稿）；紀錄與回報檔先遮掉金鑰、密碼、電子郵件與電腦使用者名稱；測試時用 `LAZY_PACK_LOGS_DIR` 指到暫存資料夾。
   - 3-5 Artifact Analysis 容器映像檔漏洞掃描（同一支 `code-and-ai-audit.mjs`，D9、D13）：`--image-scan` 只跑 3-5，`--run-ai-eval` 也跑；專案與網站取自狀態檔的 `SAVED_PROJECT_ID`、`SAVED_CLOUD_RUN_SERVICE`，從網站最新版本取映像檔 digest，要在 Artifact Registry 才掃；自動掃描（`containerscanning`）與立即掃描（`ondemandscanning`，`--scan-now`）兩種都做，開通（`--enable-image-scan`）與立即掃描都會花錢（一份映像檔 US$0.26），要帶旗標或在終端機回答 y，管線的回答不算同意；高、中風險而且已有修補版本的才讓第三階段不通過（類別代號 `IMG-VULN`、CWE-1395）；`--image-scan` 沒有結果時結束碼 2；立即掃描在 Windows 版 gcloud 不支援（真雲端實測），腳本印白話提示（改在 Mac、Linux 或 Cloud Shell 執行）後略過，自動掃描與立即掃描的輸出格式都已用真輸出核對（D14）；`reports/findings.json` 依類別代號開頭分段換掉（`WEB-`、`OBS-`、`IMG-`）；開通狀態記在狀態檔 `SAVED_IMAGE_SCAN_ENABLED`，`gcp-setup-and-check.sh` 只讀、照原樣寫回，並把開通後的月費算進費用精算器第 8 項。
 
 ## 資料夾結構
@@ -36,7 +36,7 @@ art-collector-recommender/
 │   ├── fake-recommend-api.mjs           # 假推薦 API、假網站與假 Observatory 小伺服器（網址第一段決定回對或回錯；給憑證時另開兩個 https）
 │   ├── fakebin/gcloud(.cmd)             # 假 gcloud：依參數回固定輸出並記下呼叫（.cmd 給 Windows 的 node 經 cmd.exe 叫）
 │   └── fixtures/                        # fake-nextjs-app/：乾淨的假 Next.js 專案（--self-test 掃它；測試執行時才複製一份埋問題）；real-scan/：3-5 真雲端實測輸出（專案、映像檔名稱換成假的）
-├── reports/                             # 自動輸出之單次階段報告、全部階段執行累計總報告與 findings.json（不入版控）
+├── reports/                             # 自動輸出之單次階段報告、全部階段執行累計總報告、findings.json、logs/（每次執行的全程記錄）與 problem-report-*.md／problem-email-draft-*.txt（--report-problem 產生，不入版控）
 │   （另：`docs/email-draft-to-director.md` 只留本機、不入版控，見 `.gitignore`）
 └── docs/
     ├── assessment-and-sop.md                     # 專案概況與六大資安規範 SOP 完整報告
@@ -72,6 +72,9 @@ art-collector-recommender/
 - Git Bash 的 openssl 要加 `MSYS_NO_PATHCONV=1`（不然 `-subj "/CN=…"` 會被改成 Windows 路徑），加了之後檔案路徑也要給 `cygpath -m` 轉出的 `D:/…` 寫法，不然開不了 `/tmp/…`。
 - Windows 上 node 叫 `gcloud`、`git` 要經 cmd.exe（真的是 `.cmd`），所以 `code-and-ai-audit.mjs` 的 `runCmd` 在 Windows 用 `shell: true`、參數加雙引號；假 gcloud 因此另放 `tests/fakebin/gcloud.cmd` 轉給 bash。給 node 的路徑在測試裡一律用 `cygpath -m` 轉成 `D:/…`。
 
+- 測試裡用 `cygpath -m` 轉「藏在檔案底下」的路徑會失敗並回空字串（`LAZY_PACK_LOGS_DIR` 變空就退回預設的 `reports/logs/`，寫到真的資料夾、測試還照樣通過）：先轉共同前綴再接後半段（`$(mp "$S")/afile/logs`），並對「不該發生」的情況加正面檢查。手動跑 `--self-test` 等也會重寫 `reports/full-execution-report.md` 並新增單次報告，只把紀錄指到暫存區不夠。
+- 改壞驗證用的精簡測試與改壞腳本放在暫存區：`tests/test-code-audit.sh` 第 12 段（錯誤回報）可單獨切出來跑，錨點要先確認在檔案裡剛好出現一次。
+
 ## 安全與備份
 
 - 腳本只讀取環境變數與 Secret Manager 名稱，不在 repo 內儲存任何真實 API Key、資料庫密碼或藏家真實個資。
@@ -80,4 +83,4 @@ art-collector-recommender/
 ## 改動後的驗證方式
 
 1. 修改 `lazy-pack/gcp-setup-and-check.sh` 後，用 Git Bash 的 `C:\Program Files\Git\bin\bash.exe -n lazy-pack/gcp-setup-and-check.sh` 驗證語法無誤，跑 `bash tests/test-gcp-setup.sh`（PATH 前面放假 gcloud，走真實分支、不連雲端；現在 137 項），並用 `--dry-run` 模式測試 `--stage 1`、`--stage 2`、`--stage cost` 與報告輸出。`--dry-run` 碰到 gcloud 的地方都換成寫死的假值，只驗得到選單與報告，不能取代前者。
-2. 修改 `lazy-pack/code-and-ai-audit.mjs` 或 `config/params.json` 後，執行 `node lazy-pack/code-and-ai-audit.mjs --self-test` 確認參數讀取、靜態掃描（掃 `tests/fixtures/fake-nextjs-app`）、模擬閱卷、3-3、3-5 的判斷規則與報告輸出皆通過，再跑 `bash tests/test-code-audit.sh`（假 gcloud、本機假 git repo、假 ZIP、假推薦 API 與假網站、假 Observatory 小伺服器，不連雲端、不打真的 Observatory；現在 408 項，這台實測約 1～4 分鐘（看當時負載））。手動跑 `--eval-only`、`--run-ai-eval` 前，先把 `reports/.lazy-pack-state.env` 備份並移開（裡面第一階段記下的真網址會被當成測試對象），或加 `--mock`；`tests/test-code-audit.sh` 自己會備份、移開（連同 `reports/findings.json`），結束或被中斷時還原。
+2. 修改 `lazy-pack/code-and-ai-audit.mjs` 或 `config/params.json` 後，執行 `node lazy-pack/code-and-ai-audit.mjs --self-test` 確認參數讀取、靜態掃描（掃 `tests/fixtures/fake-nextjs-app`）、模擬閱卷、3-3、3-5 的判斷規則與報告輸出皆通過，再跑 `bash tests/test-code-audit.sh`（假 gcloud、本機假 git repo、假 ZIP、假推薦 API 與假網站、假 Observatory 小伺服器，不連雲端、不打真的 Observatory；現在 479 項，這台實測約 1～4 分鐘（看當時負載））。手動跑 `--eval-only`、`--run-ai-eval` 前，先把 `reports/.lazy-pack-state.env` 備份並移開（裡面第一階段記下的真網址會被當成測試對象），或加 `--mock`；`tests/test-code-audit.sh` 自己會備份、移開（連同 `reports/findings.json`），結束或被中斷時還原。
