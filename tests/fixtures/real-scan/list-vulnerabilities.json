@@ -1,0 +1,60 @@
+[
+  {
+    "createTime": "2026-10-31T07:10:22.615433Z",
+    "kind": "VULNERABILITY",
+    "name": "projects/proj-a/locations/asia/occurrences/d4fda4d6-85f5-41d4-87ee-aec56550848d",
+    "noteName": "projects/goog-vulnz/notes/CVE-2021-36159",
+    "resourceUri": "asia-east1-docker.pkg.dev/proj-a/cloud-run-source-deploy/art-web@sha256:25ef6b512276e407c80098e3e3489bbf847588529583581d082f3ad6af726814",
+    "updateTime": "2026-10-31T07:10:22.615433Z",
+    "vulnerability": {
+      "cvssScore": 9.1,
+      "cvssv3": {
+        "attackComplexity": "ATTACK_COMPLEXITY_LOW",
+        "attackVector": "ATTACK_VECTOR_NETWORK",
+        "availabilityImpact": "IMPACT_HIGH",
+        "baseScore": 9.1,
+        "confidentialityImpact": "IMPACT_HIGH",
+        "exploitabilityScore": 3.9,
+        "impactScore": 5.2,
+        "integrityImpact": "IMPACT_NONE",
+        "privilegesRequired": "PRIVILEGES_REQUIRED_NONE",
+        "scope": "SCOPE_UNCHANGED",
+        "userInteraction": "USER_INTERACTION_NONE"
+      },
+      "effectiveSeverity": "CRITICAL",
+      "fixAvailable": true,
+      "longDescription": "NIST vectors: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:H",
+      "packageIssue": [
+        {
+          "affectedCpeUri": "cpe:/o:alpine:alpine_linux:3.10",
+          "affectedPackage": "apk-tools",
+          "affectedVersion": {
+            "fullName": "2.10.6-r0",
+            "kind": "NORMAL",
+            "name": "2.10.6",
+            "revision": "r0"
+          },
+          "effectiveSeverity": "CRITICAL",
+          "fixAvailable": true,
+          "fixedCpeUri": "cpe:/o:alpine:alpine_linux:3.10",
+          "fixedPackage": "apk-tools",
+          "fixedVersion": {
+            "fullName": "2.10.7-r0",
+            "kind": "NORMAL",
+            "name": "2.10.7",
+            "revision": "r0"
+          },
+          "packageType": "OS"
+        }
+      ],
+      "relatedUrls": [
+        {
+          "label": "More Info",
+          "url": "https://security.alpinelinux.org/vuln/CVE-2021-36159"
+        }
+      ],
+      "severity": "CRITICAL",
+      "shortDescription": "CVE-2021-36159"
+    }
+  }
+]

@@ -651,6 +651,29 @@ st11
 FAKE_AUTO_SCAN=1 FAKE_ON_DEMAND=1 FAKE_SCAN_VULNS="$(mp "$S/scan-mixed.json")" run --image-scan --scan-now < /dev/null; rc_is t11f2 $? 1
 gl_not t11f2 "services enable"
 gl_has t11f2 "images scan"
+# Windows 版 gcloud 不支援立即掃描（真雲端實測的錯誤原文）：印白話提示、略過，不去讀掃描結果，不改 findings.json
+st11
+printf '[{"category":"IMG-VULN","id":"OLD-IMG"}]\n' > "$FND"; cp "$FND" "$S/fnd.old"
+FAKE_AUTO_SCAN=1 FAKE_ON_DEMAND=1 FAKE_SCAN_ERR=windows run --image-scan --scan-now < /dev/null; rc_is t11f3 $? 2
+chk t11f3 "Windows 版 gcloud 不支援立即掃描（沒有收費）；請改在 Mac、Linux 或 Google Cloud Shell 執行 --image-scan --scan-now"
+nochk t11f3 "立即掃描失敗"
+gl_has t11f3 "images scan"
+gl_not t11f3 "list-vulnerabilities"
+cmp -s "$FND" "$S/fnd.old" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t11f3] Windows 不支援時不該改寫 findings.json"; }
+# 別的失敗（沒有錯誤訊息）：維持原本的「立即掃描失敗」
+st11
+FAKE_AUTO_SCAN=1 FAKE_ON_DEMAND=1 FAKE_GCLOUD_FAIL="images scan" run --image-scan --scan-now < /dev/null; rc_is t11f4 $? 2
+chk t11f4 "立即掃描失敗（逾時或沒有回傳掃描名稱）"
+nochk t11f4 "Windows 版 gcloud 不支援"
+# 真雲端實測的輸出（2026-10-31，gcloud 591.0.0；專案、映像檔名稱換成假的）：自動掃描 describe 與立即掃描 list-vulnerabilities 各 1 筆 CVE-2021-36159
+st11
+FAKE_AUTO_SCAN=1 FAKE_IMAGE_DESCRIBE="$(mp "$T/fixtures/real-scan/images-describe.json")" run --image-scan < /dev/null; rc_is t11l $? 1
+chk t11l "❌ 3-5 未通過（自動掃描：1 個弱點，其中 1 個高、中風險已有修補版本）"
+chk t11l "\[IMG-VULN\] CVE-2021-36159（套件：apk-tools）：已有修補版本"
+st11
+FAKE_AUTO_SCAN=1 FAKE_ON_DEMAND=1 FAKE_SCAN_VULNS="$(mp "$T/fixtures/real-scan/list-vulnerabilities.json")" run --image-scan --scan-now < /dev/null; rc_is t11l2 $? 1
+chk t11l2 "❌ 3-5 未通過（立即掃描：1 個弱點，其中 1 個高、中風險已有修補版本）"
+chk t11l2 "\[IMG-VULN\] CVE-2021-36159（套件：apk-tools）：已有修補版本"
 
 # 不在 Artifact Registry（gcr.io）：掃不了、不呼叫掃描
 st11

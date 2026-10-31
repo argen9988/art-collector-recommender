@@ -786,7 +786,9 @@ function writeFindings(parts) {
 // `images describe --show-package-vulnerability` 的外層結構文件沒寫，所以整份走一遍找 kind 是 VULNERABILITY／DISCOVERY 的物件。
 // 自動掃描（describe）的真輸出已核對（2026-10-31，gcloud 591.0.0）：弱點在 package_vulnerability_summary.vulnerabilities.<風險> 底下、
 // DISCOVERY 在 discovery_summary.discovery，修補版本欄位 vulnerability.fixAvailable＝true、packageIssue[].fixedVersion.kind＝NORMAL 都對得上。
-// 立即掃描（scan --remote、list-vulnerabilities）還沒拿真輸出核對：Windows 版 gcloud 不支援（回 "On-Demand Scanning is not supported on Windows"），預計用 Cloud Shell 驗
+// 立即掃描（scan --remote、list-vulnerabilities）也在 Cloud Shell 核對過（2026-10-31）：scan 輸出的 response.scan 是掃描名稱
+// （projects/…/locations/asia/scans/<編號>，--location=asia 被接受），list-vulnerabilities 輸出是 VULNERABILITY 物件的陣列，欄位同上；
+// Windows 版 gcloud 不支援立即掃描（回 "On-Demand Scanning is not supported on Windows"），腳本遇到時印白話提示後略過
 const SRC_ARTIFACT = 'Artifact Analysis';
 const API_AUTO_SCAN = 'containerscanning.googleapis.com';
 const API_ON_DEMAND = 'ondemandscanning.googleapis.com';
@@ -989,6 +991,10 @@ async function runImageScan(params, state, cliArgs) {
   console.log(`⏳ 立即掃描中（資料處理地點 ${parsed.location}），通常要幾分鐘…`);
   const scan = runCmd('gcloud', ['artifacts', 'docker', 'images', 'scan', img.ref, '--remote', `--location=${parsed.location}`, `--project=${project}`, '--format=value(response.scan)'], { timeout: ON_DEMAND_TIMEOUT_MS });
   const scanName = scan.ok ? scan.stdout.split(/\r?\n/).filter(Boolean).pop() : '';
+  if (!scanName && /not supported on windows/i.test(scan.stderr)) {
+    // 真雲端實測（2026-10-31，gcloud 591.0.0）：Windows 版 gcloud 的 scan 指令直接回這句，沒有掃描、沒收費
+    return skip('Windows 版 gcloud 不支援立即掃描（沒有收費）；請改在 Mac、Linux 或 Google Cloud Shell 執行 --image-scan --scan-now', autoEnabled);
+  }
   if (!scanName) return skip(`立即掃描失敗（${scan.stderr.split(/\r?\n/)[0] || '逾時或沒有回傳掃描名稱'}）`, autoEnabled);
   const v = gcloudJson(['artifacts', 'docker', 'images', 'list-vulnerabilities', scanName, `--project=${project}`]);
   if (!v.ok) return skip(`讀不到立即掃描的結果（${v.err}）`, autoEnabled);

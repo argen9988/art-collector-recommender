@@ -1,0 +1,131 @@
+{
+  "discovery_summary": {
+    "discovery": [
+      {
+        "createTime": "2026-10-31T06:13:31.882661Z",
+        "discovery": {
+          "analysisCompleted": {
+            "analysisType": [
+              "NUGET",
+              "OS",
+              "COMPOSER",
+              "PYPI",
+              "GO",
+              "MAVEN",
+              "NPM",
+              "RUBYGEMS",
+              "RUST",
+              "SECRET"
+            ]
+          },
+          "analysisStatus": "FINISHED_SUCCESS",
+          "continuousAnalysis": "ACTIVE",
+          "lastScanTime": "2026-10-31T06:13:33.512896524Z",
+          "lastVulnerabilityUpdateTime": "2026-10-31T06:13:33.512896524Z"
+        },
+        "kind": "DISCOVERY",
+        "name": "projects/proj-a/locations/asia-east1/occurrences/78836374-325e-4e21-abc3-c12e361679d9",
+        "noteName": "projects/goog-analysis/locations/asia-east1/notes/PACKAGE_VULNERABILITY",
+        "resourceUri": "https://asia-east1-docker.pkg.dev/proj-a/cloud-run-source-deploy/art-web@sha256:25ef6b512276e407c80098e3e3489bbf847588529583581d082f3ad6af726814",
+        "updateTime": "2026-10-31T06:13:33.522694Z"
+      }
+    ]
+  },
+  "image_summary": {
+    "digest": "sha256:25ef6b512276e407c80098e3e3489bbf847588529583581d082f3ad6af726814",
+    "fully_qualified_digest": "asia-east1-docker.pkg.dev/proj-a/cloud-run-source-deploy/art-web@sha256:25ef6b512276e407c80098e3e3489bbf847588529583581d082f3ad6af726814",
+    "registry": "asia-east1-docker.pkg.dev",
+    "repository": "cloud-run-source-deploy",
+    "slsa_build_level": 3
+  },
+  "package_vulnerability_summary": {
+    "vulnerabilities": {
+      "CRITICAL": [
+        {
+          "createTime": "2026-10-31T06:13:33.462380Z",
+          "kind": "VULNERABILITY",
+          "name": "projects/proj-a/locations/asia-east1/occurrences/b95eb5ad-339c-49fe-90e1-beef3389bfee",
+          "noteName": "projects/goog-vulnz/notes/CVE-2021-36159",
+          "resourceUri": "https://asia-east1-docker.pkg.dev/proj-a/cloud-run-source-deploy/art-web@sha256:25ef6b512276e407c80098e3e3489bbf847588529583581d082f3ad6af726814",
+          "updateTime": "2026-10-31T06:13:33.462380Z",
+          "vulnerability": {
+            "cvssScore": 9.1,
+            "cvssV2": {
+              "attackComplexity": "ATTACK_COMPLEXITY_LOW",
+              "attackVector": "ATTACK_VECTOR_NETWORK",
+              "authentication": "AUTHENTICATION_NONE",
+              "availabilityImpact": "IMPACT_PARTIAL",
+              "baseScore": 6.4,
+              "confidentialityImpact": "IMPACT_PARTIAL",
+              "integrityImpact": "IMPACT_NONE"
+            },
+            "cvssVersion": "CVSS_VERSION_3",
+            "cvssv3": {
+              "attackComplexity": "ATTACK_COMPLEXITY_LOW",
+              "attackVector": "ATTACK_VECTOR_NETWORK",
+              "availabilityImpact": "IMPACT_HIGH",
+              "baseScore": 9.1,
+              "confidentialityImpact": "IMPACT_HIGH",
+              "exploitabilityScore": 3.9,
+              "impactScore": 5.2,
+              "integrityImpact": "IMPACT_NONE",
+              "privilegesRequired": "PRIVILEGES_REQUIRED_NONE",
+              "scope": "SCOPE_UNCHANGED",
+              "userInteraction": "USER_INTERACTION_NONE"
+            },
+            "effectiveSeverity": "CRITICAL",
+            "fixAvailable": true,
+            "longDescription": "NIST vectors: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:H",
+            "packageIssue": [
+              {
+                "affectedCpeUri": "cpe:/o:alpine:alpine_linux:3.10",
+                "affectedPackage": "apk-tools",
+                "affectedVersion": {
+                  "fullName": "2.10.6-r0",
+                  "kind": "NORMAL",
+                  "name": "2.10.6",
+                  "revision": "r0"
+                },
+                "effectiveSeverity": "CRITICAL",
+                "fileLocation": [
+                  {
+                    "filePath": "/lib/apk/db/installed",
+                    "layerDetails": {
+                      "baseImages": [
+                        {
+                          "registry": "hub.docker.com/",
+                          "repository": "alpine"
+                        }
+                      ],
+                      "chainId": "sha256:9fb3aa2f8b8023a4bebbf92aa567caf88e38e969ada9f0ac12643b2847391635",
+                      "command": "/bin/sh -c #(nop) ADD file:c5377eaa926bf412dd8d4a08b0a1f2399cfd708743533b0aa03b53d14cb4bb4e in / ",
+                      "diffId": "sha256:9fb3aa2f8b8023a4bebbf92aa567caf88e38e969ada9f0ac12643b2847391635"
+                    }
+                  }
+                ],
+                "fixAvailable": true,
+                "fixedCpeUri": "cpe:/o:alpine:alpine_linux:3.10",
+                "fixedPackage": "apk-tools",
+                "fixedVersion": {
+                  "fullName": "2.10.7-r0",
+                  "kind": "NORMAL",
+                  "name": "2.10.7",
+                  "revision": "r0"
+                },
+                "packageType": "OS"
+              }
+            ],
+            "relatedUrls": [
+              {
+                "label": "More Info",
+                "url": "https://security.alpinelinux.org/vuln/CVE-2021-36159"
+              }
+            ],
+            "severity": "CRITICAL",
+            "shortDescription": "CVE-2021-36159"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -68,7 +68,7 @@
 12. **【細項 3-4】MDN HTTP Observatory 安全評分**：
     - 只把主機名稱送給 Mozilla 的免費服務評 A+～F（**NT$0**，不需金鑰）；掃描紀錄是公開的，所以送出前先問您（AI 代跑時要您同意、加上 --observatory 才送），本機與內網的網址、連不上的網站不送。評分 D、F 會讓第三階段不通過；沒同意、Observatory 拿不到結果時不擋。
 13. **【細項 3-5】Artifact Analysis 容器映像檔漏洞掃描**：
-    - 查網站容器映像檔（要放在 Artifact Registry）有沒有已知的套件漏洞；**開通自動掃描與「立即掃描」都會花錢（一份映像檔 US$0.26）**，所以要您同意（AI 代跑時加 --enable-image-scan、--scan-now；沒加時只有在終端機會問，從管線回答 y 不算同意）。高、中風險而且**已有修補版本**的漏洞會讓第三階段不通過；還沒有修補版本的照樣列進報告與 `reports/findings.json`，但不擋上線。沒有掃描結果（沒開通、還在掃、不在 Artifact Registry）時，單跑 --image-scan 結束碼是 2，全跑時只在報告註明。
+    - 查網站容器映像檔（要放在 Artifact Registry）有沒有已知的套件漏洞；**開通自動掃描與「立即掃描」都會花錢（一份映像檔 US$0.26）**，所以要您同意（AI 代跑時加 --enable-image-scan、--scan-now；沒加時只有在終端機會問，從管線回答 y 不算同意）。高、中風險而且**已有修補版本**的漏洞會讓第三階段不通過；還沒有修補版本的照樣列進報告與 `reports/findings.json`，但不擋上線。沒有掃描結果（沒開通、還在掃、不在 Artifact Registry）時，單跑 --image-scan 結束碼是 2，全跑時只在報告註明。**「立即掃描」在 Windows 版 gcloud 不支援**（不會收費，腳本會提示），要在 Mac、Linux 或 Google Cloud Shell 執行；自動掃描 Windows 可用。
 
 ---
 
