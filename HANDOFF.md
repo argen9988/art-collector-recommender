@@ -4,7 +4,11 @@
 
 ## 下一步
 
-1. 實作交接包 `--handoff`（D9，見 `D:\Dev\company\art-collector-recommender\docs\todo-plan.md`「【交接包】」）：把第三階段結果交給弱掃專案（`D:\Dev\company\vulnerability-scan-summary\docs\specs\`）串接年度彙整。動手前先讀 todo-plan 那一項與弱掃專案規格第 8 節，並先量要讀要改的檔共幾行、超過約 800 行就切段。欄位名稱與類別代號（`IMG-VULN`、`CWE-1395`）要請 vulnerability-scan-summary 寫進規格第 8 節，是跨專案的事，先問使用者。建議 Sonnet、high（規格明確、可用測試檢查）
+執行順序是使用者 2026-10-31 定的（也寫在 `D:\Dev\company\art-collector-recommender\docs\todo-plan.md` 第零節開頭）：① 錯誤回報 → ② 交接包 → ③ 整輪真雲端驗收。
+
+1. 【錯誤回報】（D8，todo-plan「【錯誤回報】」）：兩支腳本加 `--report-problem`、全程記錄存 `reports/logs/`、`AGENT_SETUP` 加「遇到錯誤時」一節。**開工第一件事先問使用者**：資訊相關權責單位用什麼方式收（信件、共用資料夾或其他），交接包也走同一條管道。量過的行數：`lazy-pack/gcp-setup-and-check.sh` 1,419、`lazy-pack/code-and-ai-audit.mjs` 1,717、`tests/test-gcp-setup.sh` 294、`tests/test-code-audit.sh` 706，合計超過 800 行，要切段；建議切法：(a) `code-and-ai-audit.mjs` 的 `--report-problem` 與紀錄（連同它的測試），(b) `gcp-setup-and-check.sh` 的 19 處 `2>/dev/null` 與 `--report-problem`（連同它的測試），(c) `AGENT_SETUP` 與 README 文件；每段做完收工。建議 Sonnet、high（規格明確、可用測試檢查；收件方式與遮罩範圍的決定要問使用者）
+2. 【交接包】`--handoff`（D9，todo-plan「【交接包】」）：把第三階段結果交給弱掃專案（`D:\Dev\company\vulnerability-scan-summary\docs\specs\`）串接年度彙整。動手前先讀 todo-plan 那一項與弱掃專案規格第 8 節；欄位名稱與類別代號（`IMG-VULN`、`CWE-1395`）要請 vulnerability-scan-summary 寫進規格第 8 節，是跨專案的事，先問使用者。建議 Sonnet、high
+3. 整輪真雲端驗收（todo-plan「【真雲端驗收】」）：第一、二、三階段一次在拋棄式專案驗完（估 NT$0～50）；需要使用者在場（登入、同意花費），Claude in Chrome 這台沒連上，需要瀏覽器操作時由使用者做、貼回輸出
 
 ## 目標與做到哪
 
