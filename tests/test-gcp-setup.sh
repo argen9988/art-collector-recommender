@@ -291,6 +291,17 @@ run16; rc_is t16e $? 0
 chk t16e "usd_twd_rate 讀不到或格式不合法，這次照預設值 32.5 跑"
 nochk t16e "注意：參數檔.*image_scan"   # 範圍兩端（10、1000）要收
 chk t16e "預估月費：約 NT\$325000 / 月"   # 10×1000×32.5
+# 16f. 自架平台驗證（D17）：mjs --platform-result 記下的位置照原樣寫回狀態檔，累計總報告寫「見最終弱掃結果」；沒記過寫「未執行（選做）」
+p16 0.26 20 32.5
+printf 'SAVED_PROJECT_ID="proj-a"\nSAVED_PLATFORM_RESULT="D:/弱掃/FAKE系統/03_最終弱掃結果"\n' > "$ST16"
+run16; rc_is t16f $? 0
+grep -qx 'SAVED_PLATFORM_RESULT="D:/弱掃/FAKE系統/03_最終弱掃結果"' "$ST16" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t16f] 狀態檔沒留下 SAVED_PLATFORM_RESULT"; }
+grep -qx -- "- \*\*自架平台驗證\*\*：見最終弱掃結果 D:/弱掃/FAKE系統/03_最終弱掃結果" "$R16/reports/full-execution-report.md" \
+  && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t16f] 累計總報告沒有自架平台驗證的位置"; }
+printf 'SAVED_PROJECT_ID="proj-a"\n' > "$ST16"
+run16; rc_is t16g $? 0
+grep -qx -- "- \*\*自架平台驗證\*\*：未執行（選做）" "$R16/reports/full-execution-report.md" \
+  && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t16g] 沒記過時累計總報告要寫「未執行（選做）」"; }
 
 # 17. 錯誤回報（D8、D15）：全程記錄到 LAZY_PACK_LOGS_DIR、遮蔽規則、--report-problem 轉給 code-and-ai-audit.mjs；紀錄與回報檔都要遮掉金鑰、密碼、電子郵件與家目錄
 logs_n() { find "$S/logs" -maxdepth 1 -name 'gcp-setup-and-check-*.log' 2>/dev/null | wc -l | tr -d ' '; }

@@ -23,6 +23,9 @@
  *   node lazy-pack/code-and-ai-audit.mjs --image-scan [--enable-image-scan] [--scan-now]                 # 只跑 3-5 Artifact Analysis 映像檔漏洞掃描
  *
  *   node lazy-pack/code-and-ai-audit.mjs --report-problem [--note "<出了什麼狀況>"]                        # 出問題時：產生問題回報檔與信件草稿（不寄出）
+ *   node lazy-pack/code-and-ai-audit.mjs --platform-result "<最終弱掃結果的位置>"                          # 弱掃 Skill 做完後：記進累計總報告的「自架平台驗證」一行
+ *
+ * 3-1 的結果也寫進 reports/findings.json（D17，類別代號 SRC-*，target 是原始碼裡的相對路徑；--self-test 不寫），只換掉舊的 SRC- 部分
  *
  * 錯誤回報（D8、D15）：每次執行（--report-problem 除外）都把終端機上印出的全部內容記到 reports/logs/code-and-ai-audit-<時間>.log；
  *   --report-problem 把兩支腳本最近一次的紀錄、環境（版本、作業系統、node、gcloud）與各階段最後狀態整理成 reports/problem-report-<時間>.md，
@@ -511,6 +514,24 @@ const HSTS_MIN_AGE_SEC = 15552000; // 180 天
 
 function makeFinding(category, cwe, target, severity, source, description) {
   return { category, cwe, target, severity, disposition: DISPOSITION[severity], sources: [source], description, schema_version: FINDINGS_SCHEMA_VERSION };
+}
+
+// 3-1 的結果換成同一格式（D17）：target 寫原始碼裡的相對路徑（不帶電腦使用者名稱），說明不放金鑰本身
+const SRC_SECRET_SCAN = 'Lazy Pack 金鑰掃描';
+const SRC_RULES = {
+  HARDCODED_SECRET: ['SRC-SECRET', 'CWE-798', '高'],
+  NEXT_PUBLIC_LEAK: ['SRC-PUBLIC-ENV', 'CWE-200', '中'],
+  CLIENT_SDK_IMPORT: ['SRC-CLIENT-SDK', 'CWE-602', '中'],
+  GITIGNORE_ENV: ['SRC-GITIGNORE', 'CWE-538', '低'],
+  GITIGNORE_MISSING: ['SRC-GITIGNORE', 'CWE-538', '低'],
+};
+function codeFindingsPart(scan) {
+  const findings = scan.findings.map((f) => {
+    const [category, cwe, severity] = SRC_RULES[f.rule];
+    const target = f.rule.startsWith('GITIGNORE_') ? '.gitignore' : f.file.split(path.sep).join('/');
+    return makeFinding(category, cwe, target, severity, SRC_SECRET_SCAN, f.msg);
+  });
+  return { prefixes: ['SRC-'], findings };
 }
 
 // 看一次回應：kind = 'page'（首頁）或 'error'（故意打不存在的路徑拿到的錯誤頁）
@@ -1011,6 +1032,52 @@ async function runImageScan(params, state, cliArgs) {
 // -----------------------------------------------------------------------------
 // 4. 讀取狀態檔並輸出「單次階段報告」與更新「全部執行累計總報告」
 // -----------------------------------------------------------------------------
+// 狀態檔整份照原樣寫回（gcp-setup-and-check.sh 讀寫同一份，它不認得的欄位會被丟掉，新增欄位時兩邊都要加）
+function serializeEnvState(state) {
+  return Object.entries(state)
+    .map(([k, v]) => (typeof v === 'number' ? `${k}=${v}` : `${k}="${v}"`))
+    .join('\n') + '\n';
+}
+
+// 累計總報告的「自架平台驗證」一行（D9、D17）：弱掃 Skill 做完後，負責人用 --platform-result 記下最終弱掃結果的位置
+const PLATFORM_LINE = '- **自架平台驗證**：';
+function platformResultLabel(state) {
+  const where = state.SAVED_PLATFORM_RESULT ? String(state.SAVED_PLATFORM_RESULT) : '';
+  return where ? `見最終弱掃結果 ${where}` : '未執行（選做）';
+}
+
+function recordPlatformResult(where) {
+  if (/["\r\n]/.test(where) || where.length > 500) {
+    console.log('❌ --platform-result 的位置不能有雙引號、換行，也不能超過 500 字。');
+    process.exit(2);
+  }
+  const state = parseEnvState(STATE_FILE);
+  state.SAVED_PLATFORM_RESULT = where;
+  try {
+    fs.mkdirSync(REPORTS_DIR, { recursive: true });
+    fs.writeFileSync(STATE_FILE, serializeEnvState(state), 'utf-8');
+  } catch (err) {
+    console.log(`❌ 寫不進狀態檔 ${STATE_FILE}（${err.code || err.message}）`);
+    process.exit(1);
+  }
+  console.log(`✅ 已記下自架平台驗證的最終弱掃結果位置：${where}`);
+  const full = path.join(REPORTS_DIR, 'full-execution-report.md');
+  const lines = fs.existsSync(full) ? fs.readFileSync(full, 'utf-8').split('\n') : null;
+  let i = lines ? lines.findIndex((l) => l.startsWith(PLATFORM_LINE)) : -1;
+  if (lines && i === -1) {
+    // 舊版的累計總報告沒有這一行：插在「AI 每日呼叫硬上限」那行後面
+    const q = lines.findIndex((l) => l.startsWith('- **目前鎖定之 AI 每日呼叫硬上限**'));
+    if (q !== -1) { lines.splice(q + 1, 0, ''); i = q + 1; }
+  }
+  if (i === -1) {
+    console.log('ℹ️ 累計總報告還沒有這一行，下次執行任一階段時會寫進去。');
+    return;
+  }
+  lines[i] = PLATFORM_LINE + platformResultLabel(state);
+  fs.writeFileSync(full, lines.join('\n'), 'utf-8');
+  console.log(`✅ 累計總報告已更新：${full}`);
+}
+
 function parseEnvState(filePath) {
   const state = {
     STAGE1_LAST_RUN: '尚未執行',
@@ -1098,10 +1165,7 @@ function writeReports(params, runScan, runEval, codeResult, aiResult, targetDir,
   });
   if (runScan && !isSelfTest) state.SAVED_SOURCE_DIR = targetDir;
   // 整份照原樣寫回，第一階段記下的 SAVED_PROJECT_ID、SAVED_CLOUD_RUN_URL 等欄位不能丟
-  const envContent = Object.entries(state)
-    .map(([k, v]) => (typeof v === 'number' ? `${k}=${v}` : `${k}="${v}"`))
-    .join('\n') + '\n';
-  if (!isSelfTest) fs.writeFileSync(STATE_FILE, envContent, 'utf-8'); // 自我測試不動真實狀態檔
+  if (!isSelfTest) fs.writeFileSync(STATE_FILE, serializeEnvState(state), 'utf-8'); // 自我測試不動真實狀態檔
 
   const singleReportPath = path.join(REPORTS_DIR, `stage-3-report-${ts}.md`);
   const fullReportPath = path.join(REPORTS_DIR, 'full-execution-report.md');
@@ -1160,6 +1224,7 @@ function writeReports(params, runScan, runEval, codeResult, aiResult, targetDir,
     `- **最後更新時間**：${humanTime}`,
     `- **目前設定之每月預算警示上限**：**NT$${budgetNtd} / 月**（軟止損提醒鈴）`,
     `- **目前鎖定之 AI 每日呼叫硬上限**：**${quotaRpd} 次 / 日**（硬止損保險絲，每分鐘上限 ${params.api_quota_rpm} 次）`,
+    PLATFORM_LINE + platformResultLabel(state),
     '',
     '## 一、 三階段執行總覽表（不押特定日期，依實際完成狀態更新）',
     '',
@@ -1671,8 +1736,8 @@ const reportMode = args.includes('--report-problem');
 if (!reportMode) startRunLog(args); // --report-problem 自己不留紀錄（它要讀的是上一次的紀錄）
 {
   // 不認得的選項、--target／--source／--repo／--note 缺值：直接結束碼 2（--url 缺值由 3-2 與 3-3／3-4 自己判斷，--api-path 缺值由 3-2 判斷，帶 --mock 時可略過；--api-path 只給 3-2 用）
-  const FLAGS = new Set(['--self-test', '--scan-only', '--eval-only', '--run-ai-eval', '--web-check', '--observatory', '--image-scan', '--enable-image-scan', '--scan-now', '--mock', '--target', '--source', '--repo', '--url', '--api-path', '--report-problem', '--note']);
-  const NEED_VALUE = ['--target', '--source', '--repo', '--note'];
+  const FLAGS = new Set(['--self-test', '--scan-only', '--eval-only', '--run-ai-eval', '--web-check', '--observatory', '--image-scan', '--enable-image-scan', '--scan-now', '--mock', '--target', '--source', '--repo', '--url', '--api-path', '--report-problem', '--note', '--platform-result']);
+  const NEED_VALUE = ['--target', '--source', '--repo', '--note', '--platform-result'];
   const bad = args.find((a) => a.startsWith('--') && !FLAGS.has(a));
   if (bad) {
     console.log(`❌ 不認得的選項：${bad}。可用：${[...FLAGS].join(' ')}`);
@@ -1681,7 +1746,7 @@ if (!reportMode) startRunLog(args); // --report-problem 自己不留紀錄（它
   for (const f of NEED_VALUE) {
     const i = args.indexOf(f);
     if (i !== -1 && (!args[i + 1] || args[i + 1].startsWith('--'))) {
-      console.log(`❌ ${f} 後面要接值（例如 ${f} ${f === '--source' ? 'cloud|github|local' : f === '--repo' ? '"https://github.com/公司帳號/art-collector-web"' : f === '--note' ? '"<出了什麼狀況>"' : '"<原始碼資料夾>"'}）。`);
+      console.log(`❌ ${f} 後面要接值（例如 ${f} ${f === '--source' ? 'cloud|github|local' : f === '--repo' ? '"https://github.com/公司帳號/art-collector-web"' : f === '--note' ? '"<出了什麼狀況>"' : f === '--platform-result' ? '"<最終弱掃結果的位置>"' : '"<原始碼資料夾>"'}）。`);
       process.exit(2);
     }
   }
@@ -1689,6 +1754,16 @@ if (!reportMode) startRunLog(args); // --report-problem 自己不留紀錄（它
 if (reportMode) {
   const i = args.indexOf('--note');
   writeProblemReport(i === -1 ? '' : args[i + 1]);
+  process.exit(0);
+}
+if (args.includes('--platform-result')) {
+  const i = args.indexOf('--platform-result');
+  const others = args.filter((a, j) => j !== i && j !== i + 1);
+  if (others.length) {
+    console.log(`❌ --platform-result 要單獨用（這次另外帶了 ${others.join(' ')}）。`);
+    process.exit(2);
+  }
+  recordPlatformResult(args[i + 1]);
   process.exit(0);
 }
 const isSelfTest = args.includes('--self-test');
@@ -1788,7 +1863,8 @@ const imageResult = !runImage
   : args.includes('--mock')
     ? { passed: true, hasResult: false, status: '⏭️ 未執行（帶了 --mock，不連雲端）', findings: [], findingsPart: null, autoEnabled: null }
     : await runImageScan(params, parseEnvState(STATE_FILE), args);
-const findingsFile = writeFindings([webResult && webResult.findingsPart, imageResult && imageResult.findingsPart]);
+// 自我測試掃的是假專案，不改寫使用者的 findings.json
+const findingsFile = writeFindings([runScan && !isSelfTest ? codeFindingsPart(codeResult) : null, webResult && webResult.findingsPart, imageResult && imageResult.findingsPart]);
 
 if (isSelfTest) {
   const badAccVerdict = judgeResponse(
@@ -1887,7 +1963,17 @@ if (isSelfTest) {
     && parseImageRef(imgRef.replace('asia-east1', 'us-central1'))?.location === 'us'
     && !parseImageRef('gcr.io/p/art-web@sha256:' + 'a'.repeat(64)) && !parseImageRef(imgRef.replace(/@sha256:.*/, ':latest'));
   if (!imgOk) wantCats.push('3-5 映像檔掃描結果的判斷');
-  const webOk = wantCats.every((c) => badCats.has(c)) && goodFindings.length === 0 && fieldsOk && httpOk && quietOk && obsOk && privOk && resetOk && imgOk;
+  // 3-1 轉成 findings：類別代號、CWE、等級照 D17；target 是相對路徑、用 / 分隔
+  const srcPart = codeFindingsPart({ findings: [
+    { rule: 'HARDCODED_SECRET', file: path.join('src', 'lib', 'db.ts'), msg: 'x' },
+    { rule: 'GITIGNORE_MISSING', file: path.join(os.homedir(), 'app'), msg: 'y' },
+  ] });
+  const srcOk = srcPart.prefixes.join() === 'SRC-'
+    && srcPart.findings[0].category === 'SRC-SECRET' && srcPart.findings[0].cwe === 'CWE-798' && srcPart.findings[0].severity === '高'
+    && srcPart.findings[0].target === 'src/lib/db.ts' && srcPart.findings[0].sources[0] === SRC_SECRET_SCAN
+    && srcPart.findings[1].category === 'SRC-GITIGNORE' && srcPart.findings[1].target === '.gitignore' && srcPart.findings[1].disposition === '【建議修復】';
+  if (!srcOk) wantCats.push('3-1 結果轉成 findings');
+  const webOk = wantCats.every((c) => badCats.has(c)) && goodFindings.length === 0 && fieldsOk && httpOk && quietOk && obsOk && privOk && resetOk && imgOk && srcOk;
   if (!webOk) console.error(`❌ 3-3 判斷有誤：該抓的 ${wantCats.filter((c) => !badCats.has(c)).join('、') || '都有'}；正確設定誤判 ${goodFindings.length} 筆；欄位${fieldsOk ? '齊全' : '不齊'}`);
   if (badAccVerdict.pass || badInjVerdict.pass || !leakOk || !cleanOk || !webOk) {
     console.error('❌ 自我測試失敗：負面測資未被攔截！');
@@ -1903,7 +1989,7 @@ console.log(' 📄 報告已自動輸出（單次報告 ＋ 全部執行累計�
 console.log('==============================================================================');
 console.log(` • 單次執行成果報告：${singleReportPath}`);
 console.log(` • 全部執行累計總表：${fullReportPath}`);
-if (findingsFile) console.log(` • 網址與映像檔檢查結果（給弱掃合併用）：${findingsFile}`);
+if (findingsFile) console.log(` • 原始碼、網址與映像檔檢查結果（給弱掃合併用）：${findingsFile}`);
 console.log('------------------------------------------------------------------------------');
 
 // 明說要掃映像檔（--image-scan）卻沒有結果：不印 PASS，結束碼 2（報告與開通紀錄照樣寫好）

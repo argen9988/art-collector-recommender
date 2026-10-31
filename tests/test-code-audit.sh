@@ -338,6 +338,7 @@ chk t9f "--api-path 後面要接路徑"
 #     假 Observatory 用 LAZY_PACK_OBSERVATORY_API 指過去（開頭已指到連不上的位址，任何一項都打不到真的 Observatory）；
 #     LAZY_PACK_OBSERVATORY_ALLOW_LOCAL=1 讓本機網址也送，拿掉它就是平常的設定
 fjs() { node -e "$1" "$(mp "$FND")"; }   # 用 node 讀 findings.json 判斷，印 ok 才算過
+rm -f "$FND"   # 前面掃埋了問題的假專案時寫進的 SRC- 結果，只跑 3-3／3-4 時照規則保留，這一段從空的開始算
 T10_WHY="假伺服器起不來（沒寫出三個埠號檔）"
 if MSYS_NO_PATHCONV=1 openssl req -x509 -newkey rsa:2048 -nodes -keyout "$(mp "$S/k.pem")" -out "$(mp "$S/c.pem")" -days 1 -subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1" >/dev/null 2>"$S/openssl.err"; then
   : > "$LOG"; rm -f "$S/port" "$S/port.https" "$S/port.legacy"
@@ -880,6 +881,64 @@ fchk t12k-last "$PR" "^- ⚠️ 警告第 45 行"
 fnochk t12k-first "$PR" "^- ⚠️ 警告第 1 行$"
 fchk t12k-foot "$PR" "^- 結束，結束碼 1"
 rm -rf "$S/logs"; rm -f "$ST"
+
+# 13. 3-1 的結果轉成 findings.json（D17：SRC- 開頭，只換掉舊的 SRC-，其他細項的保留）；
+#     累計總報告的「自架平台驗證」一行與 --platform-result（記進狀態檔、改寫那一行）
+rm -f "$ST" "$FULL"
+printf '[{"category":"WEB-KEEP","id":"KEEP"},{"category":"SRC-OLD","id":"OLD"}]\n' > "$FND"
+run --target "$(mp "$S/leaky")" --scan-only; rc_is t13a $? 1
+chk t13a "原始碼、網址與映像檔檢查結果（給弱掃合併用）"
+node -e '
+const f = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+const src = f.filter((x) => String(x.category).startsWith("SRC-"));
+const by = (c, t) => src.find((x) => x.category === c && x.target === t);
+const s = by("SRC-SECRET", "lib/gemini.ts"), g = by("SRC-GITIGNORE", ".gitignore");
+const ok = f.some((x) => x.id === "KEEP") && !f.some((x) => x.id === "OLD")
+  && s && s.cwe === "CWE-798" && s.severity === "高" && s.disposition === "【必要修復】" && s.sources.join() === "Lazy Pack 金鑰掃描" && s.schema_version === 1
+  && by("SRC-PUBLIC-ENV", "lib/config.ts")?.severity === "中" && by("SRC-CLIENT-SDK", "app/chat/page.tsx")?.cwe === "CWE-602"
+  && g && g.severity === "低" && g.disposition === "【建議修復】"
+  && src.every((x) => !x.target.includes("\\") && !x.target.includes(":"));
+const raw = JSON.stringify(f);
+process.exit(ok && !raw.includes(process.argv[2]) && !raw.includes(process.argv[3]) ? 0 : 1);' "$(mp "$FND")" "$KEY" "$(basename "$S")" \
+  && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t13a] findings.json 的 SRC- 不對（類別、CWE、相對路徑、舊的 SRC 換掉、WEB 留著、不含金鑰與暫存路徑）"; }
+grep -qx -- "- \*\*自架平台驗證\*\*：未執行（選做）" "$FULL" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t13a] 累計總報告沒有「自架平台驗證：未執行（選做）」"; }
+# 乾淨的專案：SRC- 清空，其他照留
+run --target "$(mp "$FIX")" --scan-only; rc_is t13b $? 0
+node -e 'const f=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.exit(f.length===1&&f[0].id==="KEEP"?0:1)' "$(mp "$FND")" \
+  && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t13b] 乾淨的專案應只剩 WEB-KEEP"; }
+# --self-test 掃假專案，不動使用者的 findings.json（先放一筆 SRC-：要是寫了，乾淨的假專案會把它清掉）
+printf '[{"category":"SRC-SECRET","id":"USER-SRC"}]\n' > "$FND"; cp "$FND" "$S/fnd.old"
+run --self-test; rc_is t13c $? 0
+cmp -s "$FND" "$S/fnd.old" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t13c] --self-test 不該改寫 findings.json"; }
+# --platform-result：記進狀態檔、改寫累計總報告那一行；之後再跑第三階段也留著
+PRES="D:/弱掃/FAKE系統/03_最終弱掃結果"
+run --platform-result "$PRES"; rc_is t13d $? 0
+chk t13d "已記下自架平台驗證的最終弱掃結果位置：$PRES"
+chk t13d "累計總報告已更新"
+grep -qx "SAVED_PLATFORM_RESULT=\"$PRES\"" "$ST" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t13d] 狀態檔沒記下位置"; }
+grep -qx -- "- \*\*自架平台驗證\*\*：見最終弱掃結果 $PRES" "$FULL" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t13d] 累計總報告那一行沒改"; }
+[ "$(grep -c '自架平台驗證' "$FULL")" = 1 ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t13d] 自架平台驗證不只一行"; }
+run --target "$(mp "$FIX")" --scan-only; rc_is t13e $? 0
+grep -qx -- "- \*\*自架平台驗證\*\*：見最終弱掃結果 $PRES" "$FULL" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t13e] 再跑第三階段後那一行不見了"; }
+# 舊版的累計總報告沒有那一行：插在 AI 每日呼叫硬上限後面；沒有累計總報告：只記狀態檔
+grep -v '自架平台驗證' "$FULL" > "$S/full.old"; cp "$S/full.old" "$FULL"
+run --platform-result "D:/弱掃/新位置"; rc_is t13f $? 0
+grep -A1 -- '^- \*\*目前鎖定之 AI 每日呼叫硬上限' "$FULL" | grep -qx -- "- \*\*自架平台驗證\*\*：見最終弱掃結果 D:/弱掃/新位置" \
+  && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t13f] 舊版總報告沒插進那一行"; }
+rm -f "$FULL"
+run --platform-result "D:/弱掃/第三個"; rc_is t13g $? 0
+chk t13g "累計總報告還沒有這一行，下次執行任一階段時會寫進去"
+[ ! -f "$FULL" ] && grep -qx 'SAVED_PLATFORM_RESULT="D:/弱掃/第三個"' "$ST" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t13g] 沒有總報告時只該記狀態檔"; }
+# 防呆：缺值、搭配別的選項、含雙引號 → 結束碼 2，狀態檔不變
+cp "$ST" "$S/st.old"
+run --platform-result; rc_is t13h $? 2
+chk t13h "--platform-result 後面要接值"
+run --platform-result "D:/x" --scan-only; rc_is t13i $? 2
+chk t13i "--platform-result 要單獨用"
+run --platform-result 'D:/a"b'; rc_is t13j $? 2
+chk t13j "不能有雙引號、換行"
+cmp -s "$ST" "$S/st.old" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t13h-j] 防呆擋下時不該改狀態檔"; }
+rm -f "$ST"
 
 echo "PASS=$pass FAIL=$fail SKIP=$skip"
 [ "$fail" -eq 0 ] && [ "$skip" -eq 0 ]

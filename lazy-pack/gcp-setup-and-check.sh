@@ -370,6 +370,7 @@ SAVED_SECRET_COUNT=2
 SAVED_EDM_SECRET_COUNT=0
 SAVED_SOURCE_DIR=""
 SAVED_IMAGE_SCAN_ENABLED=0   # 細項 3-5（code-and-ai-audit.mjs）查到的自動掃描開通狀態，這裡只讀、照原樣寫回
+SAVED_PLATFORM_RESULT=""     # 自架平台驗證的最終弱掃結果位置（code-and-ai-audit.mjs --platform-result 記下的），這裡只讀、照原樣寫回
 
 if [ -f "$STATE_FILE" ]; then
   while IFS='=' read -r s_key s_val; do
@@ -393,6 +394,7 @@ if [ -f "$STATE_FILE" ]; then
       SAVED_EDM_SECRET_COUNT) [[ "$s_val" =~ ^[0-9]+$ ]] && SAVED_EDM_SECRET_COUNT="$s_val" ;;
       SAVED_SOURCE_DIR)      SAVED_SOURCE_DIR="$s_val" ;;
       SAVED_IMAGE_SCAN_ENABLED) [[ "$s_val" =~ ^[01]$ ]] && SAVED_IMAGE_SCAN_ENABLED="$s_val" ;;
+      SAVED_PLATFORM_RESULT) SAVED_PLATFORM_RESULT="$s_val" ;;
     esac
   done < "$STATE_FILE"
 fi
@@ -1492,6 +1494,7 @@ SAVED_CLOUD_RUN_SERVICE="${CLOUD_RUN_SERVICE}"
 SAVED_CLOUD_RUN_URL="${CLOUD_RUN_URL}"
 SAVED_SOURCE_DIR="${SAVED_SOURCE_DIR}"
 SAVED_IMAGE_SCAN_ENABLED=${SAVED_IMAGE_SCAN_ENABLED}
+SAVED_PLATFORM_RESULT="${SAVED_PLATFORM_RESULT}"
 EOF
 fi
 
@@ -1499,6 +1502,8 @@ TIMESTAMP="$(date '+%Y%m%d-%H%M%S')"
 HUMAN_TIME="$(date '+%Y-%m-%d %H:%M:%S')"
 SINGLE_REPORT_FILE="${REPORTS_DIR}/stage-${TARGET_STAGE}-report-${TIMESTAMP}.md"
 FULL_REPORT_FILE="${REPORTS_DIR}/full-execution-report.md"
+PLATFORM_LABEL="未執行（選做）"
+[ -n "$SAVED_PLATFORM_RESULT" ] && PLATFORM_LABEL="見最終弱掃結果 ${SAVED_PLATFORM_RESULT}"
 
 {
   echo "# 藏家推薦系統 — 單次執行成果紀錄回報（執行階段：${TARGET_STAGE}）"
@@ -1556,6 +1561,7 @@ FULL_REPORT_FILE="${REPORTS_DIR}/full-execution-report.md"
   echo "- **藏家推薦系統網址（Cloud Run）**：${CLOUD_RUN_URL:-未探測到（第三階段改用本機原始碼檢查）}"
   echo "- **目前設定之每月預算警示上限**：**NT\$${BUDGET_MONTHLY_NTD} / 月**（軟止損提醒鈴）"
   echo "- **目前鎖定之 AI 每日呼叫硬上限**：**${API_QUOTA_RPD} 次 / 日**（硬止損保險絲，每分鐘上限 ${API_QUOTA_RPM} 次）"
+  echo "- **自架平台驗證**：${PLATFORM_LABEL}"
   echo ""
   echo "## 一、 三階段執行總覽表（不押特定日期，依實際完成狀態更新）"
   echo ""
