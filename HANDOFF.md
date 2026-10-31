@@ -21,7 +21,7 @@
 
 - 上面「下一步」那一項
 - 這次 reflection 與歷程的**去識別化版本還沒寫進 second-brain**（公司專案要先給使用者看過）：草稿在本機暫存，開工時重新產一份給使用者看；寫入前照 `reflect`、`project-log` Skill
-- Mac 也要裝 `gcloud`（使用者之前要求雙平台都裝；但 3-5 立即掃描驗證已改用 Cloud Shell，公司專案不 clone 到 Mac）：在 Mac 另開 session；要先講來源與大小、等同意
+- Mac 已經裝好 `gcloud`（使用者 2026-10-31 確認）；3-5 立即掃描改用 Cloud Shell 驗（公司專案不 clone 到 Mac），Mac 的 gcloud 等將來能在 Mac 驗的專案再用
 - 使用者自己清空資源回收筒（1,300 MB）才會釋放 C 槽空間
 - Codex 當主線呼叫別家的驗證（Antigravity 另一台已做完）：`D:\Dev\personal\ai-companion\docs\todo-plan.md`「反方向派工」，等 Codex 訂閱
 - findings.json 寫不進去只警告的測試、429／5xx 退避、真實推薦端點的格式（todo-plan「【小補強】」「【待確認】」）
