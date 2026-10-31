@@ -13,13 +13,12 @@
 ## 已完成
 
 - 3-5 真雲端驗收（2026-10-31）：自動掃描在 Windows、立即掃描在 Cloud Shell（使用者貼指令輸出，我核對）都驗完，解析程式不用改，共花 US$0.52（兩種掃描各一份 US$0.26）；立即掃描在 Windows 版 gcloud 不支援，腳本已補白話提示並加測試與真輸出 fixture（`D:\Dev\company\art-collector-recommender\tests\fixtures\real-scan\`）；拋棄式專案 `art-rec-verify-7k2m` 已刪（`DELETE_REQUESTED`，30 天內可 `gcloud projects undelete`）。細節見施工紀錄 `D:\Dev\company\art-collector-recommender\docs\worklog\2026-10.md` 最後三段、決策紀錄 D14
-- reflection 與歷程：C 槽清理、3-5 驗收兩篇的真名版與去識別化版都已寫進 `D:\Dev\project-records\company\art-collector-recommender\` 與 second-brain；3-5 驗收那篇寫的是「改在 Mac 驗」，之後改成 Cloud Shell，以決策紀錄 D14 為準（歷程只新增，沒改）
+- reflection、歷程、大事記：C 槽清理、3-5 驗收（含 Cloud Shell 驗完這一段）的真名版與去識別化版都已寫進 `D:\Dev\project-records\company\art-collector-recommender\` 與 second-brain；歷程裡較早那一段寫的是「改在 Mac 驗」，之後改成 Cloud Shell，以決策紀錄 D14 為準（歷程只新增，沒改）
 - C 槽失控輸出檔查因並加防線（dotfiles `3331be6`、ai-companion `e511c32`）；gcloud 591.0.0 以 scoop 裝在 Windows（`C:\Users\87094024\scoop\apps\gcloud\`），Mac 也已裝好 gcloud
 
 ## 還沒做完
 
 - 上面「下一步」那一項
-- 這一段（立即掃描 Cloud Shell 驗完、補提示、刪專案）的 reflection 與歷程：公司專案，真名版寫 `D:\Dev\project-records\company\art-collector-recommender\`，去識別化版先給使用者看再寫 second-brain（照 `reflect`、`project-log` Skill）
 - `gcloud config` 的 `core/project` 還指著已刪的 `art-rec-verify-7k2m`，下次用 gcloud 前先改或 `gcloud config unset project`
 - 這個專案的整輪真雲端驗收（第一、二階段）還沒跑過（todo-plan「【真雲端驗收】」）
 - 使用者自己清空資源回收筒（1,300 MB）才會釋放 C 槽空間
