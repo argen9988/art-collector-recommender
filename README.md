@@ -114,6 +114,21 @@ Lazy Pack 內建自動費用精算器（可隨時執行 `bash lazy-pack/gcp-setu
 
 ---
 
+## 🆘 遇到錯誤時：一鍵整理問題回報檔
+
+腳本出錯或結果怪怪的，不用截圖也不用描述細節，跟 AI 說「**幫我回報問題**」即可。背後做的事：
+
+- **自動留紀錄**：兩支腳本每次執行都把終端機印的全部內容記到 `reports/logs/`（`gcp-setup-and-check-<時間>.log`、`code-and-ai-audit-<時間>.log`），gcloud 查現況時畫面不印的錯誤也會記進去。
+- **整理回報檔**：`--report-problem [--note "<狀況>"]`（兩支腳本都有）會產生 `reports/problem-report-<時間>.md`（附件）與 `reports/problem-email-draft-<時間>.txt`（收件人、主旨、內文草稿）。
+- **自動遮蔽**：紀錄與回報檔已遮掉金鑰、密碼、電子郵件與電腦使用者名稱。
+- **由您寄出**：腳本不會寄信，資料不離開這台電腦。照終端機印出的四步：開新信 → 填收件人 → 貼主旨與內文 → 附上回報檔。收件人信箱不寫在程式裡，設環境變數 `LAZY_PACK_REPORT_TO` 就會自動帶入草稿。
+
+```bash
+node lazy-pack/code-and-ai-audit.mjs --report-problem --note "第二階段跑到一半停住"
+```
+
+---
+
 ## 🛠️ 五、 進階：手動執行指令參考（由 AI 自動代跑，人類無須背誦）
 
 ```bash
