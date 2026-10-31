@@ -1,6 +1,6 @@
 # 交接：3-5 映像檔漏洞掃描真雲端驗收全部完成、拋棄式專案已刪；下一步是交接包 `--handoff`
 
-> 寫於 2026-10-31（Windows，分支 master）。開工時說「開工」或打 /resume-work 讀這份。
+> 寫於 2026-10-31 15:35（Windows，分支 master）。開工時說「開工」或打 /resume-work 讀這份。
 
 ## 下一步
 
@@ -19,7 +19,6 @@
 ## 還沒做完
 
 - 上面「下一步」那一項
-- `gcloud config` 的 `core/project` 還指著已刪的 `art-rec-verify-7k2m`，下次用 gcloud 前先改或 `gcloud config unset project`
 - 這個專案的整輪真雲端驗收（第一、二階段）還沒跑過（todo-plan「【真雲端驗收】」）
 - 使用者自己清空資源回收筒（1,300 MB）才會釋放 C 槽空間
 - Codex 當主線呼叫別家的驗證（Antigravity 另一台已做完）：`D:\Dev\personal\ai-companion\docs\todo-plan.md`「反方向派工」，等 Codex 訂閱
