@@ -20,12 +20,11 @@
 
 - 錯誤回報 (a)（2026-10-31）：程式、測試第 12 段 71 項、11 種改壞驗證、D15、AGENTS.md、待辦進度、施工紀錄 `D:\Dev\company\art-collector-recommender\docs\worklog\2026-10.md`「錯誤回報 (a)」；commit 見 git log
 - 3-5 真雲端驗收（2026-10-31）、拋棄式專案已刪（見 D14）
-- reflection 與歷程：真名版在 `D:\Dev\project-records\company\art-collector-recommender\`（reflections、journey、milestones）
+- reflection 與歷程：真名版在 `D:\Dev\project-records\company\art-collector-recommender\`（reflections、journey、milestones）；去識別化版使用者看過後已寫進 second-brain 並推上 Drive
 
 ## 還沒做完
 
 - 上面「下一步」各項
-- second-brain 的去識別化版（reflection、歷程、大事記）待使用者看過才寫（見收工回報）
 - 這個專案的整輪真雲端驗收（第一、二階段）還沒跑過
 - 使用者自己清空資源回收筒（含這次移進去的，1,300 MB 以上）才會釋放 C 槽空間
 - Codex 當主線呼叫別家的驗證：`D:\Dev\personal\ai-companion\docs\todo-plan.md`「反方向派工」，等 Codex 訂閱
