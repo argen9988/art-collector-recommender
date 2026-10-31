@@ -42,3 +42,4 @@
 - 審閱材料只含某一個 commit 時，審閱者會把當時的待辦當現況；提示要註明待辦已更新，或審整個範圍
 - 寫 reflection 到 vault 前先查檔名：10-30 的 `change-review` 已被別的專案用掉，要順延編號
 - 改 dotfiles 規則檔前先 `git fetch`：另一台電腦同日可能改了同一行（這次 `delegation.md` 第 45 行就是）
+- Bash 工具裡讓 python 讀到**空的**標準輸入（空 heredoc，例如 `python3 - <<'EOF' … || python - <<'EOF2'` 第一個 `EOF` 緊接在宣告後面；或 `< /dev/null`），這台的 Python 3.14 會進互動模式、無限印 `Traceback`；超過 120 秒被移到背景後不會結束，2026-10-31 一個行程 3 小時把輸出檔寫到 13.5 GB、C 槽剩 1.2 GB。非空的 heredoc、管線都正常。dotfiles 的 `pretooluse-backslash.sh` 現在會擋這兩種形狀（dotfiles `3331be6`）；工具說「已移到背景」的任務要確認它真的會結束；C 槽剩不到 5 GB 時先查 `C:\Users\87094024\AppData\Local\Temp\claude\` 底下有沒有異常大的 `tasks\*.output`
