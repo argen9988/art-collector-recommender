@@ -357,6 +357,12 @@ LG="$(latest_log)"
 fchk t17d-pos "$LG" "參數：--bogus <HOME>/proj <HOME>/proj2"
 fchk t17d-body "$LG" "不認得的選項：--bogus"
 fnochk t17d "$LG" "alice-unique-9f3"
+# 17d2. 環境裡帶進來的 LP_HOME_ERE（外層傳給內層用的）外層不採用：設成空的也照樣遮家目錄
+rm -rf "$S/logs"
+env HOME="$FH" USERPROFILE="$(mp "$FH")" LP_HOME_ERE="" LP_SED_U="" bash "$SH" --bogus "$FH/proj" > "$S/out.txt" 2>&1; rc_is t17d2 $? 2
+LG="$(latest_log)"
+fchk t17d2-pos "$LG" "參數：--bogus <HOME>/proj"
+fnochk t17d2 "$LG" "alice-unique-9f3"
 
 # 17e. 紀錄資料夾寫不進去（路徑被一個檔案擋住）不能擋住檢查本身，也不改寫到別處（reports/logs）
 printf 'x' > "$S/afile"
@@ -390,7 +396,7 @@ SAMPLE="$S/sample.txt"; EXPECT_DIR="$S/expect"
 } > "$SAMPLE"
 ( . "$RD"; lp_redact_init; lp_redact < "$SAMPLE" > "$S/redacted.txt" )
 RO="$S/redacted.txt"
-for pat in "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC" "MIIabc" "$K_PW" "$QKEY" "abcdefghijklmnopqrstuv" "abcdefghijklmnopqrstuvwx" "sig-nature" "abcDEF123456" "xyzXYZ987654" "abc12345" "tok98765" "kkk11111" "pk22222" "owner@corp.example" "sub.example.co.uk" "沒有結尾的私鑰內容ZZZ" "123456789"; do
+for pat in "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC" "MIIabc" "$K_PW" "$QKEY" "abcdefghijklmnopqrstuv" "abcdefghijklmnopqrstuvwx" "sig-nature" "abcDEF123456" "xyzXYZ987654" "abc12345" "tok98765" "kkk11111" "pk22222" "owner@corp.example" "sub.example.co.uk" "沒有結尾的私鑰內容ZZZ"; do
   fnochk t17f "$RO" "$pat"
 done
 fchk t17f-keep1 "$RO" "^前面的行$"
@@ -484,6 +490,12 @@ fnochk t17j-mail "$LG" "bob@example.com"
 fnochk t17j-tok "$LG" "zzz98765"
 fchk t17j-foot "$LG" "^# 結束，結束碼 0"
 [ "$(grep -c '^（gcloud 錯誤）結束碼' "$LG")" = 6 ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t17j] 6 次 describe 都該各記一筆，實際 $(grep -c '^（gcloud 錯誤）結束碼' "$LG")"; }
+# 17j-empty. 失敗但 stderr 沒字：只記結束碼那行，不多一行空的「（gcloud 錯誤）」
+rm -rf "$S/logs"
+FAKE_GCLOUD_FAIL="sql instances describe" bash "$SH" --item 5 --project proj-a --check-only < /dev/null > "$S/out.txt" 2>&1; rc_is t17j-empty $? 0
+LG="$(latest_log)"
+fchk t17j-empty-hdr "$LG" "^（gcloud 錯誤）結束碼 1：gcloud sql instances describe"
+fnochk t17j-empty "$LG" "^（gcloud 錯誤）$"
 [ -z "$(find "$S/logs" -name '*.gcerr' 2>/dev/null)" ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t17j] 暫存的 .gcerr 檔跑完要刪掉"; }
 # 17j2. 成功但 stderr 有警告：也記（結束碼 0），沒有警告的呼叫不記；多行訊息每行都加前綴
 rm -rf "$S/logs"
@@ -498,6 +510,7 @@ rm -rf "$S/logs"
 LAZY_PACK_LOGGING=1 FAKE_GCLOUD_FAIL="sql instances describe" FAKE_GCLOUD_FAIL_MSG="$GERR" bash "$SH" --item 5 --project proj-a --check-only < /dev/null > "$S/out.txt" 2>&1; rc_is t17j3 $? 0
 nochk t17j3-term "PERMISSION_DENIED"
 rc_is t17j3-n "$(logs_n)" 0
+[ -z "$(find "$S" "$R" -maxdepth 3 -name '*.gcerr' 2>/dev/null)" ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t17j3] 不該留下 .gcerr：$(find "$S" "$R" -maxdepth 3 -name '*.gcerr' 2>/dev/null | head -3)"; }
 # 17j5. 暫存的 .gcerr 寫不進去（紀錄檔所在資料夾不存在）時，gcloud 仍照常執行、結果不變，只是不記
 rm -rf "$S/logs"
 LAZY_PACK_LOGGING=1 LAZY_PACK_LOG_FILE="$S/no-such-dir/x.log" bash "$SH" --stage cost --check-only < /dev/null > "$S/out.txt" 2>&1; rc_is t17j5 $? 0

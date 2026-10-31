@@ -800,7 +800,7 @@ fchk t12f-mask "$PR" "AIza\*\*\*"
 fchk t12f-mask2 "$PR" "<email>"
 fchk t12f-to "$DR" "^收件人：it-desk@corp.example"
 fchk t12f-sub "$DR" "^主旨：【Lazy Pack 問題回報】"
-fchk t12f-att "$DR" "^附件：.*problem-report-"
+fchk t12f-att "$DR" "^附件：problem-report-.*（在 reports 資料夾）"   # 只寫檔名：完整路徑裡有電腦使用者名稱
 fchk t12f-body "$DR" "按 y 之後卡住"
 
 # 12g. 沒設 LAZY_PACK_REPORT_TO：草稿的收件人欄提示要自己填；沒有任何紀錄資料夾也能產生
@@ -826,8 +826,59 @@ fnochk t12h "$PR" "OLDLOG"
 # 12i. --note 缺值、--report-problem 搭配不認得的選項：結束碼 2
 run --report-problem --note; rc_is t12i $? 2
 chk t12i "--note 後面要接值"
+chk t12i "<出了什麼狀況>"
 run --report-problem --bogus-flag; rc_is t12i2 $? 2
 chk t12i2 "不認得的選項：--bogus-flag"
+
+# 12j. 私鑰一行印一次（每行各寫一次紀錄）也要整段遮掉；沒有結尾的私鑰遮到最後，但結尾那行照樣寫進去
+#      用 node --import 先載入一段小程式，在結束時一行一行印（它的 exit 監聽比紀錄的結尾行先跑）
+cat > "$S/keylog.mjs" <<'EOF'
+const B = '-----BEGIN ' + 'PRIVATE KEY-----', E = '-----END ' + 'PRIVATE KEY-----';
+process.on('exit', () => {
+  console.log('before-key-visible');
+  console.log(B);
+  console.log('MIIbodyLINEoneQQQQ');
+  console.error('MIIbodyLINEtwoWWWW');
+  console.log(E + ' after-end-visible');
+  console.log('next-line-visible');
+  if (process.env.KEY_DANGLING) { console.log(B); console.log('MIIdanglingZZZZ'); }
+});
+EOF
+rm -rf "$S/logs"; touch "$S/run.marker"
+( cd "$S" && node --import ./keylog.mjs "$MJS" --self-test > "$S/out.txt" 2>&1 ); rc_is t12j $? 0
+chk t12j-term "MIIbodyLINEoneQQQQ"   # 終端機上原樣
+LG="$(latest_log code-and-ai-audit)"
+fchk t12j-before "$LG" "before-key-visible"
+fchk t12j-mask "$LG" "<私鑰已遮蔽>"
+fnochk t12j "$LG" "MIIbodyLINEone"
+fnochk t12j "$LG" "MIIbodyLINEtwo"
+fchk t12j-after "$LG" "after-end-visible"
+fchk t12j-next "$LG" "next-line-visible"
+fchk t12j-foot "$LG" "^# 結束，結束碼 0"
+rm -rf "$S/logs"; touch "$S/run.marker"
+( cd "$S" && KEY_DANGLING=1 node --import ./keylog.mjs "$MJS" --self-test > "$S/out.txt" 2>&1 ); rc_is t12j2 $? 0
+LG="$(latest_log code-and-ai-audit)"
+fnochk t12j2 "$LG" "MIIdanglingZZZZ"
+fchk t12j2-foot "$LG" "^# 結束，結束碼 0"
+
+# 12k. 失敗與警告的行：❌ 優先、取最近的；gcloud 原本的「ERROR:」也收；結尾取最後一個「# 結束，結束碼 N」
+rm -rf "$S/logs"; mkdir -p "$S/logs"
+{
+  echo '# gcp-setup-and-check.sh 開始 2026-01-02 00:00:00'
+  for i in $(seq 1 45); do echo "⚠️ 警告第 $i 行"; done
+  echo 'ERROR: (gcloud.sql.instances.describe) boom'
+  echo '❌ 最後的失敗'
+  echo '# 結束 這行是程式印的，不是結尾'
+  echo
+  echo '# 結束，結束碼 1'
+} > "$S/logs/gcp-setup-and-check-20260102-000000.log"
+run --report-problem; rc_is t12k $? 0
+PR="$(latest_prob)"
+fchk t12k-bad "$PR" "^- ❌ 最後的失敗"
+fchk t12k-err "$PR" "^- ERROR: (gcloud.sql"
+fchk t12k-last "$PR" "^- ⚠️ 警告第 45 行"
+fnochk t12k-first "$PR" "^- ⚠️ 警告第 1 行$"
+fchk t12k-foot "$PR" "^- 結束，結束碼 1"
 rm -rf "$S/logs"; rm -f "$ST"
 
 echo "PASS=$pass FAIL=$fail SKIP=$skip"

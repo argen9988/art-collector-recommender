@@ -74,10 +74,11 @@ lp_home_ere() {
   '
 }
 
-# 遮蔽規則放進 LP_SED_ARGS（sed 的參數）；能用 -u 就用，Ctrl-C 時才不會丟掉還沒寫出的行
+# 遮蔽規則放進 LP_SED_ARGS（sed 的參數）；能用 -u 就用，寫進紀錄才不會卡在緩衝區
+# 外層算好的家目錄 ERE 與 -u 探測結果用 LP_HOME_ERE、LP_SED_U 傳給內層，內層不用再開外部程式
 lp_redact_init() {
   local home_ere
-  home_ere="$(lp_home_ere)"
+  if [ -n "${LP_HOME_ERE+x}" ]; then home_ere="$LP_HOME_ERE"; else home_ere="$(lp_home_ere)"; LP_HOME_ERE="$home_ere"; fi
   LP_SED_ARGS=(-E)
   [ -n "$home_ere" ] && LP_SED_ARGS+=(-e "s#${home_ere}#<HOME>#g")
   LP_SED_ARGS+=(
@@ -102,7 +103,10 @@ lp_redact_init() {
     -e "s#(([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Pp][Ww][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Aa][Pp][Ii][_-]?[Kk][Ee][Yy]|[Pp][Rr][Ii][Vv][Aa][Tt][Ee][_-]?[Kk][Ee][Yy]|[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn])[\"']?[[:space:]]*[:=][[:space:]]*)([\"']?)[^[:space:]\"',;]+#\1\3***#g"
     -e 's#[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}#<email>#g'
   )
-  if sed -u -e p /dev/null >/dev/null 2>&1; then LP_SED_ARGS=(-u "${LP_SED_ARGS[@]}"); fi
+  if [ -z "${LP_SED_U+x}" ]; then
+    if sed -u -e p /dev/null >/dev/null 2>&1; then LP_SED_U=1; else LP_SED_U=""; fi
+  fi
+  [ -z "$LP_SED_U" ] || LP_SED_ARGS=(-u "${LP_SED_ARGS[@]}")
 }
 
 # 標準輸入逐行遮蔽後寫到標準輸出（要先跑過 lp_redact_init）
@@ -126,7 +130,7 @@ lp_gcloud() {
     [ -n "${LP_SED_ARGS+x}" ] || lp_redact_init
     {
       printf '（gcloud 錯誤）結束碼 %s：gcloud %s\n' "$rc" "$*"
-      while IFS= read -r line; do printf '（gcloud 錯誤）%s\n' "$line"; done <<<"$err"
+      [ -z "$err" ] || while IFS= read -r line; do printf '（gcloud 錯誤）%s\n' "$line"; done <<<"$err"
     } | lp_redact >> "$tmp" 2>/dev/null
   fi
   return "$rc"
@@ -142,11 +146,12 @@ lp_run_logged() {
   while [ -e "$file" ]; do file="${base}-${i}.log"; i=$((i + 1)); done
   set -C; { : > "$file"; } 2>/dev/null; made=$?; set +C
   [ "$made" -eq 0 ] || return 1
+  unset LP_HOME_ERE LP_SED_U   # 外層一律自己算，不用環境裡帶進來的值
   lp_redact_init
   printf '# %s.sh 開始 %s｜參數：%s｜bash %s｜%s\n' "$SCRIPT_NAME" "${now#*|}" "$*" "${BASH_VERSION:-?}" "$(uname -sr 2>/dev/null)" | lp_redact >> "$file"
   trap ':' INT   # Ctrl-C 只打斷裡面那支，這裡還要把結尾寫進紀錄
   {
-    LAZY_PACK_LOGGING=1 LAZY_PACK_LOG_FILE="$file" "$BASH" "$SELF" "$@" 2>&1 | tee /dev/fd/3 | lp_redact >> "$file"
+    LAZY_PACK_LOGGING=1 LAZY_PACK_LOG_FILE="$file" LP_HOME_ERE="$LP_HOME_ERE" LP_SED_U="$LP_SED_U" "$BASH" "$SELF" "$@" 2>&1 | tee /dev/fd/3 | lp_redact >> "$file"
     rc=${PIPESTATUS[0]}
   } 3>&1
   rm -f "${file}.gcerr"
@@ -182,6 +187,8 @@ if [ -z "${LAZY_PACK_LOGGING:-}" ]; then
     case "$lp_a" in --report-problem|-h|--help) lp_skip=1 ;; esac
   done
   [ -n "$lp_skip" ] || lp_run_logged "$@"   # 成功時不會回來（直接 exit）；記不下來才往下照常執行
+elif [ -n "${LAZY_PACK_LOG_FILE:-}" ]; then
+  lp_redact_init   # 內層：先在主殼準備好，lp_gcloud 在 $(...) 裡失敗時才不用每次重算
 fi
 
 # 選項需要值：缺值或後面直接接另一個選項就結束（結束碼 2），不悄悄套用預設

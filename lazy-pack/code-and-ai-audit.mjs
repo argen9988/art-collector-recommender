@@ -1515,9 +1515,20 @@ function startRunLog(argv) {
   } catch {
     return;
   }
+  // 私鑰常是一行印一次：BEGIN 之後還沒看到 END 前，後面每次印的都整段遮掉（redactSecrets 一次只看得到一段）
+  let inKey = false;
   const write = (chunk) => {
     try {
-      fs.writeSync(fd, redactSecrets(Buffer.isBuffer(chunk) ? chunk.toString('utf-8') : chunk));
+      let s = Buffer.isBuffer(chunk) ? chunk.toString('utf-8') : String(chunk);
+      if (inKey) {
+        const m = /-----END [A-Z ]*PRIVATE KEY-----/.exec(s);
+        if (!m) return;
+        inKey = false;
+        s = s.slice(m.index + m[0].length);
+      }
+      const begins = [...s.matchAll(/-----BEGIN [A-Z ]*PRIVATE KEY-----/g)];
+      if (begins.length && !/-----END [A-Z ]*PRIVATE KEY-----/.test(s.slice(begins[begins.length - 1].index))) inKey = true;
+      fs.writeSync(fd, redactSecrets(s));
     } catch { /* 記不下來就算了 */ }
   };
   for (const stream of [process.stdout, process.stderr]) {
@@ -1533,7 +1544,7 @@ function startRunLog(argv) {
     console.error(`❌ 腳本發生未預期的錯誤：${(err && err.stack) || err}`);
     process.exit(1);
   });
-  process.on('exit', (code) => write(`\n# 結束，結束碼 ${code}\n`));
+  process.on('exit', (code) => { inKey = false; write(`\n# 結束，結束碼 ${code}\n`); }); // 私鑰沒有結尾時，結尾那行仍要寫進去
 }
 
 // 某支腳本最近一次的紀錄，整理成問題回報檔的一節
@@ -1548,8 +1559,21 @@ function problemLogSection(script) {
   if (!files.length) return `### ${script}\n\n沒有找到執行紀錄（還沒跑過，或紀錄資料夾被清掉）。\n`;
   const lines = redactSecrets(fs.readFileSync(path.join(LOGS_DIR, files[0].n), 'utf-8')).split(/\r?\n/);
   const header = lines.find((l) => l.startsWith('# ') && l.includes('開始')) || '（沒有開始紀錄）';
-  const footer = lines.find((l) => l.startsWith('# 結束')) || '# （沒有結束紀錄：執行中途被中斷，或當掉）';
-  const probs = [...new Set(lines.filter((l) => /❌|⚠|Traceback|Error:|（gcloud 錯誤）/.test(l)).map((l) => l.trim()))].slice(0, LOG_PROBLEM_LINES);
+  const footer = [...lines].reverse().find((l) => /^# 結束，結束碼 \d+/.test(l)) || '# （沒有結束紀錄：執行中途被中斷，或當掉）';
+  // ❌ 優先，同一類取最後面的（最近的問題通常才是要回報的），再照紀錄裡的先後排回去
+  const seen = new Set();
+  const cand = [];
+  lines.forEach((l, i) => {
+    const t = l.trim();
+    if (!/❌|⚠|Traceback|Error:|ERROR:|（gcloud 錯誤）/i.test(t) || seen.has(t)) return;
+    seen.add(t);
+    cand.push({ t, i, bad: t.includes('❌') });
+  });
+  const bad = cand.filter((c) => c.bad);
+  const rest = cand.filter((c) => !c.bad);
+  const keep = bad.slice(-LOG_PROBLEM_LINES);
+  const room = LOG_PROBLEM_LINES - keep.length;
+  const probs = keep.concat(room > 0 ? rest.slice(-room) : []).sort((a, b) => a.i - b.i).map((c) => c.t);
   const tail = lines.slice(-LOG_TAIL_LINES).join('\n');
   return [
     `### ${script}（紀錄檔 ${files[0].n}）`,
@@ -1557,7 +1581,7 @@ function problemLogSection(script) {
     `- ${header.replace(/^# /, '')}`,
     `- ${footer.replace(/^# /, '')}`,
     '',
-    `**失敗與警告的行**（最多 ${LOG_PROBLEM_LINES} 行）：`,
+    `**失敗與警告的行**（最多 ${LOG_PROBLEM_LINES} 行，❌ 優先、取最近的）：`,
     '',
     probs.length ? probs.map((l) => `- ${l}`).join('\n') : '- 沒有 ❌ 或 ⚠️ 的行',
     '',
@@ -1623,7 +1647,7 @@ function writeProblemReport(note) {
     '謝謝',
   ].join('\n');
   const draftPath = path.join(REPORTS_DIR, `problem-email-draft-${ts}.txt`);
-  fs.writeFileSync(draftPath, `收件人：${to}\n主旨：${subject}\n附件：${reportPath}\n\n${mailBody}\n`, 'utf-8');
+  fs.writeFileSync(draftPath, `收件人：${to}\n主旨：${subject}\n附件：${path.basename(reportPath)}（在 reports 資料夾）\n\n${mailBody}\n`, 'utf-8');
 
   console.log('==============================================================================');
   console.log(' 🧾 問題回報檔已產生（不會自動寄出，資料不離開這台電腦，由您用電子郵件寄出）');
@@ -1657,7 +1681,7 @@ if (!reportMode) startRunLog(args); // --report-problem 自己不留紀錄（它
   for (const f of NEED_VALUE) {
     const i = args.indexOf(f);
     if (i !== -1 && (!args[i + 1] || args[i + 1].startsWith('--'))) {
-      console.log(`❌ ${f} 後面要接值（例如 ${f} ${f === '--source' ? 'cloud|github|local' : f === '--repo' ? '"https://github.com/公司帳號/art-collector-web"' : '"<原始碼資料夾>"'}）。`);
+      console.log(`❌ ${f} 後面要接值（例如 ${f} ${f === '--source' ? 'cloud|github|local' : f === '--repo' ? '"https://github.com/公司帳號/art-collector-web"' : f === '--note' ? '"<出了什麼狀況>"' : '"<原始碼資料夾>"'}）。`);
       process.exit(2);
     }
   }
