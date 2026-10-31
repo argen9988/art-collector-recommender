@@ -786,7 +786,7 @@ function writeFindings(parts) {
 // `images describe --show-package-vulnerability` 的外層結構文件沒寫，所以整份走一遍找 kind 是 VULNERABILITY／DISCOVERY 的物件。
 // 自動掃描（describe）的真輸出已核對（2026-10-31，gcloud 591.0.0）：弱點在 package_vulnerability_summary.vulnerabilities.<風險> 底下、
 // DISCOVERY 在 discovery_summary.discovery，修補版本欄位 vulnerability.fixAvailable＝true、packageIssue[].fixedVersion.kind＝NORMAL 都對得上。
-// 立即掃描（scan --remote、list-vulnerabilities）還沒拿真輸出核對：Windows 版 gcloud 不支援（回 "On-Demand Scanning is not supported on Windows"），要在 Mac／Linux／Cloud Shell 驗
+// 立即掃描（scan --remote、list-vulnerabilities）還沒拿真輸出核對：Windows 版 gcloud 不支援（回 "On-Demand Scanning is not supported on Windows"），預計用 Cloud Shell 驗
 const SRC_ARTIFACT = 'Artifact Analysis';
 const API_AUTO_SCAN = 'containerscanning.googleapis.com';
 const API_ON_DEMAND = 'ondemandscanning.googleapis.com';

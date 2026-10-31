@@ -4,7 +4,7 @@
 
 ## 下一步
 
-1. 3-5 立即掃描的真雲端驗收（**要在 Mac 做**，Windows 版 gcloud 不支援立即掃描；需要使用者在場）：自動掃描那半已在 Windows 驗完（見「已完成」）。Mac 步驟：①裝 gcloud（先講來源與大小、等同意）並登入同一個帳號；②`gcloud config set project art-rec-verify-7k2m`（拋棄式專案保留中，`ondemandscanning` 已開，映像檔 `asia-east1-docker.pkg.dev/art-rec-verify-7k2m/verify-repo/old-alpine@sha256:25ef6b512276e407c80098e3e3489bbf847588529583581d082f3ad6af726814` 已在）；③**動手前問使用者**：立即掃描一次約 US$0.26；④`gcloud artifacts docker images scan <映像檔> --remote --location=asia --format=json`，再 `list-vulnerabilities <掃描名稱> --format=json`，核對輸出格式、`response.scan` 欄位與 location 對應，丟進 `collectOccurrences`／`imageFindings`（預期同樣 1 筆 CVE-2021-36159、高、已有修補）；⑤驗完 `gcloud projects delete art-rec-verify-7k2m`。細節在 `docs/todo-plan.md`「【細項 3-5】」。建議 Sonnet、high
+1. 3-5 立即掃描的真雲端驗收（**用 Google Cloud Shell 驗**，Windows 版 gcloud 不支援立即掃描；使用者決定不用 Mac，公司專案只留在 Windows；需要使用者在場貼輸出）：自動掃描那半已在 Windows 驗完（見「已完成」）。步驟：①使用者在瀏覽器開 Cloud Shell（同一個 Google 帳號），`gcloud config set project art-rec-verify-7k2m`（拋棄式專案保留中，`ondemandscanning` 已開，映像檔 `asia-east1-docker.pkg.dev/art-rec-verify-7k2m/verify-repo/old-alpine@sha256:25ef6b512276e407c80098e3e3489bbf847588529583581d082f3ad6af726814` 已在）；②**動手前問使用者**：立即掃描一次約 US$0.26；③Cloud Shell 跑 `gcloud artifacts docker images scan <映像檔> --remote --location=asia --format=json`，再 `list-vulnerabilities <掃描名稱> --format=json`，使用者把兩份輸出貼回來，存成檔（存暫存區，不放 repo）；④用 `collectOccurrences`／`imageFindings` 核對（預期 1 筆 CVE-2021-36159、高、已有修補），並確認 `scan` 輸出的 `response.scan` 欄位與 location 對應；⑤驗完 `gcloud projects delete art-rec-verify-7k2m`（Windows 的 gcloud 能刪）；⑥接著補 Windows 白話提示（使用者已決定驗完一起做，見 `docs/todo-plan.md`「【細項 3-5】」）。建議 Sonnet、high
 
 ## 目標與做到哪
 
@@ -14,14 +14,14 @@
 
 - C 槽只剩 1.5 GB：查到前一個 session 留下的 `python.exe -` 把背景輸出檔寫到 13.5 GB，結束行程、永久刪除該檔，C 槽回到 14.87 GB；另 1,300 MB（VS 解壓資料夾 7 個、VS Code 擴充快取 5 項）在資源回收筒，等使用者清空
 - 真因與防線：空的標準輸入（空 heredoc、`< /dev/null`）讓這台 Python 3.14 進互動模式無限印 `Traceback`；dotfiles `pretooluse-backslash.sh` 加檢查、測試 35 項全過、真 Bash 工具實測擋得到（dotfiles `3331be6`），pitfalls 補一條（ai-companion `e511c32`）
-- 真雲端驗收前置：scoop 裝 `gcloud` 591.0.0（`C:\Users\87094024\scoop\apps\gcloud\`，374 MB）、`gcloud auth login` 已登入（使用者的 Google 帳號）、建拋棄式專案 `art-rec-verify-7k2m`、綁到使用者既有的帳單帳戶、預算警示 NT$150（帳戶幣別是新台幣，用美元會 INVALID_ARGUMENT；帳戶原本就有一個 NT$10 的預算，沒動）。**2026-10-31 下午已開掃描 API、用 Cloud Build 推 `alpine:3.10` 舊版、自動掃描 US$0.26（約 NT$8.5）**；自動掃描輸出核對完、解析程式不用改；立即掃描 Windows 不支援（沒花錢），專案保留給 Mac 驗
+- 真雲端驗收前置：scoop 裝 `gcloud` 591.0.0（`C:\Users\87094024\scoop\apps\gcloud\`，374 MB）、`gcloud auth login` 已登入（使用者的 Google 帳號）、建拋棄式專案 `art-rec-verify-7k2m`、綁到使用者既有的帳單帳戶、預算警示 NT$150（帳戶幣別是新台幣，用美元會 INVALID_ARGUMENT；帳戶原本就有一個 NT$10 的預算，沒動）。**2026-10-31 下午已開掃描 API、用 Cloud Build 推 `alpine:3.10` 舊版、自動掃描 US$0.26（約 NT$8.5）**；自動掃描輸出核對完、解析程式不用改；立即掃描 Windows 不支援（沒花錢），專案保留，改用 Cloud Shell 驗
 - 施工紀錄見 `D:\Dev\company\art-collector-recommender\docs\worklog\2026-10.md`「2026-10-31 C 槽清理…」；真名版 reflection 在 `D:\Dev\project-records\company\art-collector-recommender\reflections\2026-10-31_windows_disk-cleanup.md`，歷程已追加
 
 ## 還沒做完
 
 - 上面「下一步」那一項
 - 這次 reflection 與歷程的**去識別化版本還沒寫進 second-brain**（公司專案要先給使用者看過）：草稿在本機暫存，開工時重新產一份給使用者看；寫入前照 `reflect`、`project-log` Skill
-- Mac 也要裝 `gcloud`（使用者要求雙平台都裝）：在 Mac 另開 session；要先講來源與大小、等同意
+- Mac 也要裝 `gcloud`（使用者之前要求雙平台都裝；但 3-5 立即掃描驗證已改用 Cloud Shell，公司專案不 clone 到 Mac）：在 Mac 另開 session；要先講來源與大小、等同意
 - 使用者自己清空資源回收筒（1,300 MB）才會釋放 C 槽空間
 - Codex 當主線呼叫別家的驗證（Antigravity 另一台已做完）：`D:\Dev\personal\ai-companion\docs\todo-plan.md`「反方向派工」，等 Codex 訂閱
 - findings.json 寫不進去只警告的測試、429／5xx 退避、真實推薦端點的格式（todo-plan「【小補強】」「【待確認】」）
