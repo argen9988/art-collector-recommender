@@ -119,10 +119,10 @@ lp_redact() {
 lp_gcloud() {
   local rc err line tmp="${LAZY_PACK_LOG_FILE:-}"
   if [ -z "$tmp" ] || ! { : >"${tmp}.gcerr"; } 2>/dev/null; then
-    command gcloud "$@" 2>/dev/null
+    command gcloud "$@" </dev/null 2>/dev/null
     return
   fi
-  command gcloud "$@" 2>"${tmp}.gcerr"
+  command gcloud "$@" </dev/null 2>"${tmp}.gcerr"
   rc=$?
   err="$(<"${tmp}.gcerr")"
   err="${err//$'\r'/}"
@@ -151,9 +151,9 @@ lp_run_logged() {
   printf '# %s.sh 開始 %s｜參數：%s｜bash %s｜%s\n' "$SCRIPT_NAME" "${now#*|}" "$*" "${BASH_VERSION:-?}" "$(uname -sr 2>/dev/null)" | lp_redact >> "$file"
   trap ':' INT   # Ctrl-C 只打斷裡面那支，這裡還要把結尾寫進紀錄
   {
-    LAZY_PACK_LOGGING=1 LAZY_PACK_LOG_FILE="$file" LP_HOME_ERE="$LP_HOME_ERE" LP_SED_U="$LP_SED_U" "$BASH" "$SELF" "$@" 2>&1 | tee /dev/fd/3 | lp_redact >> "$file"
+    LAZY_PACK_LOGGING=1 LAZY_PACK_LOG_FILE="$file" LP_HOME_ERE="$LP_HOME_ERE" LP_SED_U="$LP_SED_U" "$BASH" "$SELF" "$@" 2>&1 | tee >(lp_redact >> "$file")
     rc=${PIPESTATUS[0]}
-  } 3>&1
+  }
   rm -f "${file}.gcerr"
   printf '\n# 結束，結束碼 %s\n' "$rc" >> "$file"
   exit "$rc"
@@ -664,7 +664,7 @@ if should_run_item 1; then
   if [ "$MODE" = "dry-run" ]; then
     BILLING_ENABLED="true"
   else
-    BILLING_ENABLED="$(lp_gcloud beta billing projects describe "$PROJECT_ID" --format="value(billingEnabled)" || echo "false")"
+    BILLING_ENABLED="$(lp_gcloud billing projects describe "$PROJECT_ID" --format="value(billingEnabled)" || echo "false")"
   fi
 
   if [ "$BILLING_ENABLED" = "True" ] || [ "$BILLING_ENABLED" = "true" ]; then
@@ -851,7 +851,7 @@ if should_run_item 4; then
         SECRET_EXISTS="true"
       fi
     else
-      if gcloud secrets describe "$SECRET_NAME" --project="$PROJECT_ID" >/dev/null 2>&1; then
+      if lp_gcloud secrets describe "$SECRET_NAME" --project="$PROJECT_ID" --quiet >/dev/null; then
         SECRET_EXISTS="true"
       fi
     fi
@@ -1376,7 +1376,7 @@ if should_run_item 8; then
     [ "$SAVED_SECRET_COUNT" -lt 0 ] && SAVED_SECRET_COUNT=0
     SAVED_EDM_SECRET_COUNT=0
     for EDM_SEC in "EDM_API_KEY" "CRON_SECRET"; do
-      if [ "$MODE" != "dry-run" ] && gcloud secrets describe "$EDM_SEC" --project="$PROJECT_ID" >/dev/null 2>&1; then
+      if [ "$MODE" != "dry-run" ] && lp_gcloud secrets describe "$EDM_SEC" --project="$PROJECT_ID" --quiet >/dev/null; then
         echo "✅ [已存在，自動跳過] Secret Manager 中已存在 EDM 密鑰：${EDM_SEC}"
         SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
         SAVED_SECRET_COUNT=$((SAVED_SECRET_COUNT + 1))
