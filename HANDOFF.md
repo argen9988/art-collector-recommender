@@ -6,7 +6,7 @@
 
 1. 【交接包】B2 後半：`D:\Dev\company\art-collector-recommender\lazy-pack\code-and-ai-audit.mjs` 的 `runHandoff`（「交接包 --handoff」那一節）打包成功後，比照 `writeProblemReport` 的信件草稿（同檔「錯誤回報」那一節）另寫 `reports/handoff/<代號>-<時間>-email-draft.txt` 之類的草稿（收件人走環境變數、不寫進程式；要不要跟 `LAZY_PACK_REPORT_TO` 共用是未定事項，先共用並在草稿註明）；`config/params.json` 加 `handoff_max_attachment_mb`（暫定 10，估的；`DEFAULTS`、`RANGES`、`_說明` 都要加），ZIP 超過時提示改放共用資料夾；`tests/test-code-audit.sh` 第 14 段加測試（參數檔用跟預設、正式值都不同的數字翻面測，見 playbook feature-testing 第 6 步），AGENTS.md「交接包」那一項與參數清單跟著改。估約 400 行（mjs 兩節約 200、第 14 段 143、新寫約 100）。建議模型與努力程度：主力模型、high（要上線的程式）；不用使用者在場
 2. 補這次的 reflection 與專案歷程的去識別化版進 second-brain（完整版：`D:\Dev\project-records\company\art-collector-recommender\reflections\2026-11-01_windows_feature-design.md`、`D:\Dev\project-records\company\art-collector-recommender\journey\2026-11-01_windows.md`，歷程標 `second_brain: pending`）；要使用者先看過。可以跟第 1 項同一個 session 開頭做
-3. 【交接包】C：`AGENT_SETUP_雲端資安設定與驗收指南.md` 加「交給資訊權責單位」一節（含 `--handoff`、`--platform-result`），README 跟著改；之後 B1＋B2＋C 照 `review-changes` 審一輪、整輪真雲端驗收。建議模型與努力程度：文件 Sonnet、medium（下一段用主力模型抽查）；審閱用主力模型選審閱者；真雲端驗收要使用者在場
+3. 【交接包】C：`AGENT_SETUP_雲端資安設定與驗收指南.md` 加「交給資訊權責單位」一節（含 `--handoff`、`--platform-result`），README 跟著改；之後 B1＋B2＋C 照 `review-changes` 審一輪、整輪真雲端驗收。建議模型與努力程度：文件 Sonnet、medium（下一段用主力模型抽查）；審閱由使用者在 Antigravity 開這個專案、當主線用 Gemini 3.8 Flash（High）做（使用者 2026-11-01 定；Flash 當審閱者 2026-10-30 在 medium 實測有 2 點講錯，High 沒測過，每個問題先對照程式查證再改）；真雲端驗收要使用者在場
 
 ## 目標與做到哪
 
@@ -21,7 +21,7 @@
 
 - 上面「下一步」各項
 - manifest 欄位名稱寫進弱掃規格第 4 節（在 vulnerability-scan-summary 做；待辦【交接包】）
-- `gcp-setup-and-check.sh` 預設值 `NT$0` 被展開成腳本路徑（待辦【小補強】，這次發現、沒修）
+- `gcp-setup-and-check.sh` 預設值 `NT$0` 被展開成腳本路徑（待辦【小補強】，這次發現、使用者說先放待辦；會把執行者的路徑帶進交接包，交出交接包之前要修）
 - 附件上限的實際數字、交接包收件人是否同錯誤回報的信箱：要問資訊相關權責單位（D17「未定」）
 - 使用者自己清空資源回收筒才會釋放 C 槽空間
 - Codex 當主線呼叫別家的驗證：`D:\Dev\personal\ai-companion\docs\todo-plan.md`「反方向派工」，等 Codex 訂閱
