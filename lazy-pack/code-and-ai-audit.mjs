@@ -104,6 +104,8 @@ const DEFAULTS = {
   eval_max_budget_ntd: 200000,
   eval_pass_threshold_pct: 100,
   eval_request_timeout_sec: 30,
+  eval_abort_after_failures: 3,
+  eval_retry_after_max_sec: 60,
   image_scan_usd_per_image: 0.26,
   image_scan_deploys_per_month: 20,
   usd_twd_rate: 32.5,
@@ -121,6 +123,8 @@ const RANGES = {
   eval_max_budget_ntd: [10000, 10000000],
   eval_pass_threshold_pct: [80, 100],
   eval_request_timeout_sec: [5, 300],
+  eval_abort_after_failures: [2, 20],
+  eval_retry_after_max_sec: [0, 600],
   image_scan_usd_per_image: [0, 10],
   image_scan_deploys_per_month: [1, 1000],
   usd_twd_rate: [20, 50],
@@ -405,7 +409,17 @@ function resolveEvalEndpoint(cliArgs, state) {
   return { ok: true, mode: 'online', url: base, endpoint, from, warn, fromState };
 }
 
-// 送一題到線上端點；回傳 { response } 或 { error, fatal }（fatal = 每題都會一樣失敗，不必再打）
+// Retry-After 可以是秒數或日期；看不懂或沒有就回 null
+function parseRetryAfter(v) {
+  if (!v) return null;
+  if (/^\d+$/.test(v.trim())) return Number(v.trim());
+  const t = Date.parse(v);
+  return Number.isFinite(t) ? Math.max(0, Math.ceil((t - Date.now()) / 1000)) : null;
+}
+const RETRY_WAIT_DEFAULT_SEC = 2; // 網站沒說等多久時，429／5xx 等這麼久再重送一次
+
+// 送一題到線上端點；回傳 { response } 或 { error, fatal, transient, retryable }
+// （fatal = 每題都會一樣失敗，不必再打；transient = 逾時、429、5xx，連續幾題就中止；retryable = 429、5xx，等一下重送一次）
 async function askOnline(target, tc, params) {
   const headers = { 'Content-Type': 'application/json', Accept: 'application/json, text/plain' };
   if (process.env.LAZY_PACK_API_TOKEN) headers.Authorization = `Bearer ${process.env.LAZY_PACK_API_TOKEN}`;
@@ -430,7 +444,7 @@ async function askOnline(target, tc, params) {
   } catch (err) {
     const timedOut = err && (err.name === 'TimeoutError' || err.name === 'AbortError');
     return timedOut
-      ? { error: `等了 ${params.eval_request_timeout_sec} 秒沒有回應（逾時）`, fatal: false }
+      ? { error: `等了 ${params.eval_request_timeout_sec} 秒沒有回應（逾時）`, fatal: false, transient: true }
       : { error: `連不上 ${target.endpoint}（${(err.cause && err.cause.code) || err.message}）`, fatal: true };
   }
   if (res.status === 401 || res.status === 403) {
@@ -438,6 +452,9 @@ async function askOnline(target, tc, params) {
   }
   if (res.status === 404 || res.status === 405) {
     return { error: `這個網址沒有推薦端點（HTTP ${res.status}）：請問開發者推薦 API 的路徑，用 --api-path 指定`, fatal: true };
+  }
+  if (res.status === 429 || res.status >= 500) {
+    return { error: `網站回 HTTP ${res.status}`, fatal: false, transient: true, retryable: true, retryAfterSec: parseRetryAfter(res.headers.get('retry-after')) };
   }
   if (!res.ok) return { error: `網站回 HTTP ${res.status}`, fatal: false };
   try {
@@ -478,6 +495,7 @@ async function runAiEvaluation(params, target) {
   const gapMs = online && suite.length > params.api_quota_rpm ? Math.ceil(60000 / params.api_quota_rpm) : 0;
   let passedCount = 0;
   let fatalError = null;
+  let transientStreak = 0; // 連續幾題逾時、429 或 5xx
 
   for (const [i, tc] of suite.entries()) {
     if (fatalError) {
@@ -487,11 +505,22 @@ async function runAiEvaluation(params, target) {
     if (gapMs && i > 0) await new Promise((r) => setTimeout(r, gapMs));
     let verdict;
     if (online) {
-      const r = await askOnline(target, tc, params);
+      let r = await askOnline(target, tc, params);
+      if (r.retryable) {
+        const waitSec = Math.min(r.retryAfterSec ?? RETRY_WAIT_DEFAULT_SEC, params.eval_retry_after_max_sec);
+        console.log(`⏳ [${tc.id}] ${r.error}，${waitSec} 秒後重送一次`);
+        await new Promise((res) => setTimeout(res, waitSec * 1000));
+        r = await askOnline(target, tc, params);
+      }
       if (r.error) {
         verdict = { pass: false, reason: r.error };
         if (r.fatal) fatalError = r.error;
+        else if (r.transient) {
+          transientStreak++;
+          if (transientStreak >= params.eval_abort_after_failures) fatalError = `連續 ${transientStreak} 題逾時或網站回 429／5xx（${r.error}），網站可能撐不住或已掛掉`;
+        } else transientStreak = 0;
       } else {
+        transientStreak = 0;
         verdict = judgeResponse(tc, r.response);
       }
     } else {

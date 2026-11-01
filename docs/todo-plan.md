@@ -8,8 +8,6 @@
 
 > **執行順序（使用者 2026-10-31 定）**：① 【錯誤回報】（已做完，收件方式定為電子郵件，見 D15）→ ② 【交接包】→ ③ 【真雲端驗收】（整輪，第一、二、三階段一次驗完，放最後好用完整功能一次驗）。②的附件大小上限要問資訊相關權責單位。其他【小補強】【待確認】【待討論】不排順序，有空檔再做。
 
-- [ ] **【小補強】findings.json 寫不進去只警告的測試**（D12 再審提出，2026-10-30）：程式有 try/catch 只警告，但測試沒有這個情境；Windows 上把檔案設唯讀或換成資料夾才做得出來，之後補。
-- [ ] **【小補強】`--url` 線上測試遇到 429／5xx 的處理**（段 B2 審閱提出，2026-10-29 暫緩）：目前會連續打完剩下的題目，全部逾時最壞約 10 分鐘（20 題乘 30 秒）。真實端點格式確認後，再加「讀 `Retry-After` 退避」與「連續幾題逾時或 5xx 就中止」。
 - [ ] **【待確認】真實推薦端點的路徑與格式**：段 B2 的 `--url` 測試假設 `POST /api/recommend`、送 JSON（含虛構庫存 `inventory`）、回 `{ recommendations, cc_list, blocked, message }`。真實系統（AI Studio Build 產生的 Next.js）的推薦端點路徑、要不要登入、回傳格式都未知；拋棄式專案驗收或拿到原始碼時查清楚，不同就調 `askOnline` 或用 `--api-path`。
 - [ ] **【真雲端驗收】用拋棄式 GCP 專案跑一輪（見 D7 第 ③ 層）**：使用者用個人帳號建一個新 GCP 專案（不放公司資料）、部署 hello-world Cloud Run，照 `AGENT_SETUP` 從第一階段跑到第三階段，跑完關閉專案（估 NT$0～50）。（2026-10-31 已用拋棄式專案驗完 3-5 映像檔掃描並刪除專案；第一、二階段還沒在真雲端跑過。）跑第二階段時順便驗兩件假 gcloud 測不出來的事（2026-10-31 審閱錯誤回報時發現）：① 開著全程記錄（腳本輸出經管線）時，會改東西的 gcloud（2-2 的 `sql instances patch`，沒加 `--quiet`）還會不會照常問 `(Y/n)`、輸入有沒有效，不行就這類呼叫改成不經管線；② 在 Git Bash 執行中途按 Ctrl-C，看紀錄最後幾行有沒有掉（`tee`、`sed` 會一起收到中斷），掉了就讓那兩段 `trap '' INT`。
 - [ ] **【交接包】`--handoff` 產出給弱掃 Skill 的交接包**（D9、D17）：`code-and-ai-audit.mjs` 加 `--handoff`，產出 `reports/handoff/<系統>-<時間>/`（`manifest.json`、`findings.json`、`full-execution-report.md`、`source.zip`、`README.md`）與它的 ZIP；格式照 `D:\Dev\company\vulnerability-scan-summary\docs\specs\annual-and-system-reports-spec.md` 第 4、8 節（欄位表已寫進第 8 節，`schema_version` 1）。做法照 D17，還沒做的（B1、B2、C 已做完，見施工紀錄 2026-10-31、2026-11-01）：manifest 的欄位名稱已寫進弱掃規格第 4 節（2026-11-01）；C（指南第六步、README 交接包一節）與 B1＋B2＋C 的 Sonnet 審閱（9 份）2026-11-01 已做完，審閱發現照改（D18、施工紀錄），剩整輪真雲端驗收（使用者指定由 Antigravity 的 Gemini Flash High 做）。附件上限（10 MB，超過改雲端硬碟）與收件人（可能不同，`LAZY_PACK_HANDOFF_TO`）資訊單位已回覆，見 D19。

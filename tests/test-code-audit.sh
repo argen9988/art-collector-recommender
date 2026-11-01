@@ -234,9 +234,43 @@ if [ -s "$S/port" ]; then
   chk t8g4 "被 Git Bash 改成 Windows 路徑"
 
   : > "$LOG"; run --eval-only --url "$B/boom"; rc_is t8h $? 1
-  chk t8h "\[INJ-10\] 失敗：網站回 HTTP 500"
-  nochk t8h "未測"
-  cnt_is t8h "$(nlog boom)" 20
+  # 5xx：每題等 2 秒重送一次（都失敗），連續 3 題（eval_abort_after_failures 的預設與正式值）就中止，後面不再送：3 題 × 2 次 = 6 次
+  chk t8h "\[ACC-01\] 失敗：網站回 HTTP 500"
+  chk t8h "\[ACC-01\] 網站回 HTTP 500，2 秒後重送一次"
+  chk t8h "測到一半卡住（連續 3 題逾時或網站回 429／5xx"
+  chk t8h "\[ACC-04\] 未測：前面已經卡住"
+  cnt_is t8h "$(nlog boom)" 6
+
+  # 429：Retry-After: 1 → 等 1 秒重送一次，這一題就過了，其他題不受影響
+  : > "$LOG"; run --eval-only --url "$B/throttle"; rc_is t8o $? 0
+  chk t8o "\[ACC-01\] 網站回 HTTP 429，1 秒後重送一次"
+  chk t8o "通過 20/20 題"
+  nochk t8o "未測"
+  cnt_is t8o "$(nlog throttle)" 21
+  # Retry-After 很大（86400 秒）：照上限 eval_retry_after_max_sec 等；測試用複本把上限改成 0（範圍最小值，正式值 60），等 0 秒就重送
+  mkdir -p "$S/capcopy/lazy-pack" "$S/capcopy/config"
+  cp "$MJS" "$S/capcopy/lazy-pack/"
+  sed 's/"eval_retry_after_max_sec": *[0-9][0-9]*/"eval_retry_after_max_sec": 0/;s/"eval_abort_after_failures": *[0-9][0-9]*/"eval_abort_after_failures": 2/' "$R/config/params.json" > "$S/capcopy/config/params.json"
+  grep -q '"eval_retry_after_max_sec": 0,$' "$S/capcopy/config/params.json" && grep -q '"eval_abort_after_failures": 2,$' "$S/capcopy/config/params.json" \
+    && ! grep -q '"eval_retry_after_max_sec": 0,$' "$R/config/params.json" && ! grep -q '"eval_abort_after_failures": 2,$' "$R/config/params.json" \
+    && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t8p] 自訂參數檔沒換到，或跟正式值一樣"; }
+  : > "$LOG"; node "$(mp "$S/capcopy/lazy-pack/code-and-ai-audit.mjs")" --eval-only --url "$B/throttle-big" > "$S/out.txt" 2>&1; rc_is t8p $? 0
+  chk t8p "\[ACC-01\] 網站回 HTTP 429，0 秒後重送一次"
+  chk t8p "通過 20/20 題"
+  cnt_is t8p "$(nlog throttle-big)" 21
+  # eval_abort_after_failures 自訂成 2（正式值 3）：一直回 503 的網站，連續 2 題就中止，2 題 × 2 次 = 4 次
+  : > "$LOG"; node "$(mp "$S/capcopy/lazy-pack/code-and-ai-audit.mjs")" --eval-only --url "$B/down" > "$S/out.txt" 2>&1; rc_is t8q $? 1
+  chk t8q "測到一半卡住（連續 2 題逾時或網站回 429／5xx"
+  chk t8q "\[ACC-03\] 未測：前面已經卡住"
+  cnt_is t8q "$(nlog down)" 4
+  # 預設的 down（連續 3 題）：6 次
+  : > "$LOG"; run --eval-only --url "$B/down"; rc_is t8q2 $? 1
+  chk t8q2 "連續 3 題"
+  cnt_is t8q2 "$(nlog down)" 6
+  # 參數檔的新參數超出範圍 → 照預設跑並說明
+  sed 's/"eval_abort_after_failures": *[0-9][0-9]*/"eval_abort_after_failures": 1/' "$R/config/params.json" > "$S/capcopy/config/params.json"
+  node "$(mp "$S/capcopy/lazy-pack/code-and-ai-audit.mjs")" --eval-only --mock > "$S/out.txt" 2>&1
+  chk t8r "eval_abort_after_failures=1 缺漏或超出範圍 (2~20)，這次照預設值 3 跑"
 
   # 逾時：只複製腳本與參數檔，把 eval_request_timeout_sec 改成 5（參數檔允許的最小值），ACC-01 會逾時、其餘照常
   mkdir -p "$S/slowcopy/lazy-pack" "$S/slowcopy/config"
@@ -938,6 +972,17 @@ chk t13i "--platform-result 要單獨用"
 run --platform-result 'D:/a"b'; rc_is t13j $? 2
 chk t13j "不能有雙引號、換行"
 cmp -s "$ST" "$S/st.old" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t13h-j] 防呆擋下時不該改狀態檔"; }
+# 13k. findings.json 寫不進去只警告、不中斷（D12）：把 findings.json 換成同名的資料夾（讀、寫都會失敗），
+#      有問題的專案照樣結束碼 1、結果照樣印在畫面與單次報告，乾淨的專案照樣結束碼 0；資料夾本身不能被動到
+rm -rf "$FND"; mkdir -p "$FND/keep"
+run --target "$(mp "$S/leaky")" --scan-only; rc_is t13k $? 1
+chk t13k "寫不進 .*findings.json"
+chk t13k "結果只留在畫面與報告裡"
+chk t13k "第三階段總體檢結果：FAIL"
+[ -d "$FND" ] && [ -d "$FND/keep" ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t13k] 同名的資料夾被動到了"; }
+run --target "$(mp "$FIX")" --scan-only; rc_is t13k2 $? 0
+chk t13k2 "寫不進 .*findings.json"
+rm -rf "$FND"
 rm -f "$ST"
 
 # 14. 交接包 --handoff（D17）：先重跑 3-1，SRC-SECRET 整包不出；產出資料夾與同名 ZIP（manifest、findings、累計總報告、source.zip、README）；

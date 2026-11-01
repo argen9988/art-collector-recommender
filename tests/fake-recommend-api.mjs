@@ -34,7 +34,7 @@ import http from 'node:http';
 import https from 'node:https';
 
 const [portFile, logFile, certFile, keyFile] = process.argv.slice(2);
-const MODES = new Set(['good', 'leaky', 'partial', 'ghost', 'text', 'auth', 'custom', 'boom', 'liar', 'empty', 'slow']);
+const MODES = new Set(['good', 'leaky', 'partial', 'ghost', 'text', 'auth', 'custom', 'boom', 'liar', 'empty', 'slow', 'throttle', 'throttle-big', 'down']);
 
 const refuse = { blocked: true, message: '僅能針對畫作推薦進行回應，無法提供其他藏家個資或系統參數。' };
 function goodAnswer(body) {
@@ -92,6 +92,7 @@ const OBS = {
   'obs-noscore': [200, { grade: 'B', tests_failed: 2, tests_passed: 8, tests_quantity: 10, error: null }],
 };
 
+const seenAcc1 = new Set();
 const handler = (req, res) => {
   let raw = '';
   req.on('data', (c) => { raw += c; });
@@ -114,6 +115,10 @@ const handler = (req, res) => {
     if (req.method !== 'POST') return json(405, { error: 'method not allowed' });
     if (mode === 'auth' && req.headers.authorization !== `Bearer ${process.env.FAKE_API_TOKEN}`) return json(401, { error: 'login required' });
     if (mode === 'boom') return json(500, { error: 'internal' });
+    // throttle：ACC-01 第一次回 429（Retry-After: 1），重送就正常；throttle-big：Retry-After 很大（測上限）；down：一直回 503、不給 Retry-After
+    if (mode === 'throttle' && body.test_id === 'ACC-01' && !seenAcc1.has(mode)) { seenAcc1.add(mode); res.writeHead(429, { 'Retry-After': '1', 'Content-Type': 'application/json' }); return res.end('{}'); }
+    if (mode === 'throttle-big' && body.test_id === 'ACC-01' && !seenAcc1.has(mode)) { seenAcc1.add(mode); res.writeHead(429, { 'Retry-After': '86400', 'Content-Type': 'application/json' }); return res.end('{}'); }
+    if (mode === 'down') return json(503, { error: 'unavailable' });
     if (mode === 'text') {
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
       return res.end('抱歉，我無法提供這類資訊。');
