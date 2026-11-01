@@ -30,7 +30,9 @@
  *   產出 reports/handoff/<系統代號>-<時間>/（manifest.json、findings.json、full-execution-report.md、source.zip、README.md）與同名 ZIP，
  *   格式照 vulnerability-scan-summary 規格第 4 節；source.zip 一律排除 .env*、.git、node_modules、.next 與捷徑；ZIP 用 node 內建的 zlib 產生。
  *   系統名稱、系統代號、負責人、環境：參數 → 狀態檔記下的（SAVED_HANDOFF_*）→ 在終端機依序問（管線時每題一行，順序是原始碼確認（沒帶 --target 時）、名稱、代號、負責人、環境），
- *   問到的記進狀態檔；缺了就結束碼 2。測試時用 LAZY_PACK_HANDOFF_DIR 把交接包指到暫存資料夾
+ *   問到的記進狀態檔；缺了就結束碼 2。打包成功後另寫信件草稿 reports/handoff/<系統代號>-<時間>-email-draft.txt（不寄出；收件人同錯誤回報用 LAZY_PACK_REPORT_TO，
+ *   交接包要不要寄給同一個信箱還沒定，草稿裡註明）；ZIP 超過 config/params.json 的 handoff_max_attachment_mb 時提示改放共用資料夾，草稿改寫成附上共用資料夾的位置。
+ *   測試時用 LAZY_PACK_HANDOFF_DIR 把交接包指到暫存資料夾
  *
  * 3-1 的結果也寫進 reports/findings.json（D17，類別代號 SRC-*，target 是原始碼裡的相對路徑；--self-test 不寫），只換掉舊的 SRC- 部分
  *
@@ -105,6 +107,7 @@ const DEFAULTS = {
   image_scan_usd_per_image: 0.26,
   image_scan_deploys_per_month: 20,
   usd_twd_rate: 32.5,
+  handoff_max_attachment_mb: 10,
 };
 
 const RANGES = {
@@ -121,6 +124,7 @@ const RANGES = {
   image_scan_usd_per_image: [0, 10],
   image_scan_deploys_per_month: [1, 1000],
   usd_twd_rate: [20, 50],
+  handoff_max_attachment_mb: [1, 1000],
 };
 
 function loadParams() {
@@ -1989,9 +1993,11 @@ async function runHandoff(cliArgs) {
   // 4. 打包：reports/handoff/<系統代號>-<時間>/ 與同名 ZIP
   const { ts } = nowStamp();
   let base = `${values.SAVED_HANDOFF_SYSTEM_CODE}-${ts}`;
-  for (let n = 2; fs.existsSync(path.join(HANDOFF_DIR, base)) || fs.existsSync(path.join(HANDOFF_DIR, `${base}.zip`)); n++) base = `${values.SAVED_HANDOFF_SYSTEM_CODE}-${ts}-${n}`;
+  const taken = (b) => [b, `${b}.zip`, `${b}-email-draft.txt`].some((f) => fs.existsSync(path.join(HANDOFF_DIR, f)));
+  for (let n = 2; taken(base); n++) base = `${values.SAVED_HANDOFF_SYSTEM_CODE}-${ts}-${n}`;
   const outDir = path.join(HANDOFF_DIR, base);
   const zipPath = `${outDir}.zip`;
+  let manifest, counts, total;
   try {
     fs.mkdirSync(outDir, { recursive: true });
     const src = collectSourceEntries(t.dir);
@@ -2001,7 +2007,7 @@ async function runHandoff(cliArgs) {
     const full = path.join(REPORTS_DIR, 'full-execution-report.md');
     const hasReport = fs.existsSync(full);
     if (hasReport) fs.copyFileSync(full, path.join(outDir, 'full-execution-report.md'));
-    const manifest = {
+    manifest = {
       schema_version: HANDOFF_SCHEMA_VERSION,
       system_name: values.SAVED_HANDOFF_SYSTEM_NAME,
       system_code: values.SAVED_HANDOFF_SYSTEM_CODE,
@@ -2014,8 +2020,9 @@ async function runHandoff(cliArgs) {
       test_account: '由負責人另外提供',
     };
     fs.writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
-    const counts = Object.fromEntries(SEVERITY_ORDER.map((s) => [s, findings.filter((f) => f && f.severity === s).length]));
-    fs.writeFileSync(path.join(outDir, 'README.md'), handoffReadme(manifest, counts, findings.length, src.entries.length, hasReport), 'utf-8');
+    counts = Object.fromEntries(SEVERITY_ORDER.map((s) => [s, findings.filter((f) => f && f.severity === s).length]));
+    total = findings.length;
+    fs.writeFileSync(path.join(outDir, 'README.md'), handoffReadme(manifest, counts, total, src.entries.length, hasReport), 'utf-8');
     const files = ['manifest.json', 'findings.json', ...(hasReport ? ['full-execution-report.md'] : []), 'source.zip', 'README.md'];
     writeZip(zipPath, files.map((f) => {
       const p = path.join(outDir, f);
@@ -2024,15 +2031,82 @@ async function runHandoff(cliArgs) {
     console.log('\n------------------------------------------------------------------------------');
     console.log(' ✅ 交接包已產生');
     console.log(` • 資料夾：${outDir}`);
-    console.log(` • ZIP（要寄出的就是這個）：${zipPath}（${(fs.statSync(zipPath).size / 1024 / 1024).toFixed(2)} MB）`);
+    console.log(` • ZIP（要交出去的就是這個）：${zipPath}（${mbText(fs.statSync(zipPath).size)} MB）`);
     console.log(` • 原始碼 ${src.entries.length} 個檔；排除了 ${src.excluded.length} 個（.env*、.git、node_modules、.next 與捷徑）`);
     if (!hasReport) console.log(' ⚠️ 這台電腦還沒有累計總報告（三個階段都還沒跑過），交接包裡沒有 full-execution-report.md');
     if (!manifest.target_url) console.log(' ⚠️ 沒有記下網站網址（先跑第一階段會記下），交接包的受測網址是空的');
-    console.log('------------------------------------------------------------------------------');
   } catch (err) {
     console.log(`❌ 打包失敗：${err.message}（${outDir}）`);
     process.exit(1);
   }
+
+  // 5. 信件草稿（D17 第 6 點）：ZIP 不超過附件上限就當附件，超過就請負責人改放共用資料夾、信裡寫位置；不寄出
+  const zipBytes = fs.statSync(zipPath).size;
+  const maxMb = loadParams().handoff_max_attachment_mb;
+  const over = zipBytes > maxMb * 1024 * 1024;
+  const draft = handoffEmailDraft(manifest, counts, total, path.basename(zipPath), zipBytes, maxMb, over);
+  const draftPath = path.join(HANDOFF_DIR, `${base}-email-draft.txt`);
+  let draftOk = true;
+  try {
+    fs.writeFileSync(draftPath, draft.text, 'utf-8');
+  } catch (err) {
+    draftOk = false;
+    console.log(` ⚠️ 信件草稿寫不進去（${err.code || err.message}），交接包照樣可以用；請照下面的步驟自己寫信`);
+  }
+  if (over) {
+    console.log(` ⚠️ ZIP 有 ${mbText(zipBytes)} MB，超過信件附件上限 ${maxMb} MB（config/params.json 的 handoff_max_attachment_mb）：`);
+    console.log('    請不要當附件寄，改放到資訊相關權責單位同意的共用資料夾，在信裡寫上位置。');
+  }
+  if (draftOk) console.log(` • 信件草稿（主旨與內文，不會自動寄出）：${draftPath}`);
+  console.log('');
+  console.log(' ✉️ 請這樣交出去：');
+  console.log(`   1. 開一封新信，收件人：${draft.to}`);
+  console.log(`   2. 主旨：${draft.subject}`);
+  console.log(over
+    ? `   3. 把 ${path.basename(zipPath)} 放到共用資料夾，在內文填上位置（不當附件）`
+    : `   3. 附件：${path.basename(zipPath)}（位置見上面）`);
+  console.log(draftOk ? '   4. 內文可複製草稿檔裡的文字' : '   4. 內文寫系統名稱、受測網址，並請對方驗證完回覆最終弱掃結果的位置');
+  console.log('   測試帳號不要寫在信裡，另外交給資訊相關權責單位。');
+  console.log('------------------------------------------------------------------------------');
+}
+
+const mbText = (bytes) => (bytes / 1024 / 1024).toFixed(2);
+
+// 交接包的信件草稿：收件人走 LAZY_PACK_REPORT_TO（同錯誤回報；交接包要不要寄同一個信箱還沒定，草稿裡註明），檔名只寫名稱不寫完整路徑（路徑裡有電腦使用者名稱）
+function handoffEmailDraft(m, counts, total, zipName, zipBytes, maxMb, over) {
+  const to = process.env.LAZY_PACK_REPORT_TO || '（請填資訊相關權責單位的信箱；設環境變數 LAZY_PACK_REPORT_TO 就會自動帶入）';
+  const { human } = nowStamp();
+  const subject = `【Lazy Pack 交接包】${m.system_name}（${m.system_code}，${m.environment}）請協助用自架弱掃平台驗證（${human}）`;
+  const body = [
+    '您好，',
+    '',
+    over
+      ? `「${m.system_name}」的交接包（${zipName}，${mbText(zipBytes)} MB）超過信件附件上限，已放在共用資料夾：（請填共用資料夾的位置），請協助用自架弱掃平台再驗證。`
+      : `附上「${m.system_name}」的交接包（${zipName}），請協助用自架弱掃平台再驗證。`,
+    '',
+    `- 系統代號：${m.system_code}（${m.environment}）`,
+    `- 受測網址：${m.target_url || '（沒有記下網址，請向系統負責人確認）'}`,
+    `- 系統負責人：${m.owner}`,
+    `- Lazy Pack 檢測結果：共 ${total} 筆（高 ${counts['高']}、中 ${counts['中']}、低 ${counts['低']}、資訊 ${counts['資訊']}），在交接包的 findings.json`,
+    `- 測試帳號：${m.test_account}（不放在交接包與這封信裡）`,
+    '',
+    '交接包的內容說明見 ZIP 裡的 README.md。驗證完成後，請回覆最終弱掃結果的位置，我會記進 Lazy Pack 的累計總報告。',
+    '',
+    '謝謝',
+  ].join('\n');
+  const attach = over
+    ? `附件：不附檔（${zipName} 有 ${mbText(zipBytes)} MB，超過附件上限 ${maxMb} MB；請放到共用資料夾，在內文填上位置）`
+    : `附件：${zipName}（${mbText(zipBytes)} MB，和這份草稿在同一個資料夾）`;
+  const text = [
+    `收件人：${to}`,
+    '（收件人沿用錯誤回報的環境變數 LAZY_PACK_REPORT_TO；交接包要不要寄給同一個信箱，還沒跟資訊相關權責單位確認，寄出前請確認）',
+    `主旨：${subject}`,
+    attach,
+    '',
+    body,
+    '',
+  ].join('\n');
+  return { to, subject, text };
 }
 
 // -----------------------------------------------------------------------------

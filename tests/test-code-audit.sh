@@ -970,8 +970,21 @@ printf '# FAKE-FULL-REPORT\n' > "$FULL"
 run --handoff --target "$(mp "$C")" "${HF[@]}" < /dev/null; rc_is t14b $? 0
 chk t14b "交接包已產生"
 chk t14b "排除了 7 個"
-BASE="$(find "$HD" -mindepth 1 -maxdepth 1 -type d -name 'FAKE-SYS-*' | head -1)"; Z="$BASE.zip"
-[ -n "$BASE" ] && [ -f "$Z" ] && [ "$(hcount)" = 2 ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14b] 應有一個 FAKE-SYS-<時間> 資料夾與同名 ZIP"; }
+BASE="$(find "$HD" -mindepth 1 -maxdepth 1 -type d -name 'FAKE-SYS-*' | head -1)"; Z="$BASE.zip"; DRF="$BASE-email-draft.txt"
+[ -n "$BASE" ] && [ -f "$Z" ] && [ -f "$DRF" ] && [ "$(hcount)" = 3 ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14b] 應有一個 FAKE-SYS-<時間> 資料夾、同名 ZIP 與信件草稿"; }
+# 信件草稿（D17 第 6 點）：沒設 LAZY_PACK_REPORT_TO → 收件人要自己填；ZIP 沒超過附件上限（正式參數檔）→ 當附件；檔名只寫名稱
+chk t14b "信件草稿（主旨與內文，不會自動寄出）"
+chk t14b "主旨：【Lazy Pack 交接包】假系統 甲（FAKE-SYS，-dev）"
+nochk t14b "超過信件附件上限"
+fchk t14b-to "$DRF" "^收件人：（請填資訊相關權責單位的信箱"
+fchk t14b-same "$DRF" "沿用錯誤回報的環境變數 LAZY_PACK_REPORT_TO；交接包要不要寄給同一個信箱，還沒跟資訊相關權責單位確認"
+fchk t14b-sub "$DRF" "^主旨：【Lazy Pack 交接包】假系統 甲（FAKE-SYS，-dev）請協助用自架弱掃平台驗證"
+fchk t14b-att "$DRF" "^附件：$(basename "$Z")（[0-9.]* MB，和這份草稿在同一個資料夾）$"
+fchk t14b-url "$DRF" "^- 受測網址：https://fake-site.example.invalid$"
+fchk t14b-cnt "$DRF" "^- Lazy Pack 檢測結果：共 2 筆（高 0、中 1、低 0、資訊 1）"
+fchk t14b-acc "$DRF" "^- 測試帳號：由負責人另外提供（不放在交接包與這封信裡）"
+fnochk t14b-share "$DRF" "共用資料夾"
+fnochk t14b-path "$DRF" "$(basename "$S")"   # 不寫完整路徑（裡面有電腦使用者名稱）
 if command -v unzip >/dev/null 2>&1 && [ -f "$Z" ]; then
   B="$(basename "$BASE")"
   unzip -tq "$Z" > /dev/null && unzip -tq "$BASE/source.zip" > /dev/null && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14b] ZIP 驗證失敗（unzip -t）"; }
@@ -1026,7 +1039,8 @@ git -C "$G" init -q && git -C "$G" -c user.name=t -c user.email=t@example.invali
 HEADSHA="$(git -C "$G" rev-parse HEAD)"
 printf 'SAVED_SOURCE_DIR="%s"\n' "$(mp "$G")" >> "$ST"
 rm -f "$FULL"
-printf '\n' | run --handoff; rc_is t14c $? 0
+printf '\n' | LAZY_PACK_REPORT_TO="it-desk@corp.example" run --handoff; rc_is t14c $? 0
+chk t14c "收件人：it-desk@corp.example"
 chk t14c "要打包上次第三階段掃描的原始碼"
 chk t14c "：FAKE-SYS（上次記下的"
 chk t14c "還沒有累計總報告"
@@ -1034,6 +1048,8 @@ nochk t14c "請輸入"
 BASE2="$(find "$HD" -mindepth 1 -maxdepth 1 -type d -name 'FAKE-SYS-*' -newer "$S/run.marker" | head -1)"
 [ -n "$BASE2" ] && [ ! -f "$BASE2/full-execution-report.md" ] && grep -q "\"value\": \"$HEADSHA\"" "$BASE2/manifest.json" && grep -q '"kind": "commit"' "$BASE2/manifest.json" \
   && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14c] manifest 應記 commit $HEADSHA、沒有累計總報告時不放那個檔"; }
+fchk t14c-to "$BASE2-email-draft.txt" "^收件人：it-desk@corp.example$"
+[ -z "${LAZY_PACK_REPORT_TO:-}" ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14c] LAZY_PACK_REPORT_TO 不該留在測試環境"; }
 # 14d. 回答 n：不打包、結束碼 2
 n0="$(hcount)"
 printf 'n\n' | run --handoff; rc_is t14d $? 2
@@ -1082,6 +1098,34 @@ run --handoff --target "$(mp "$R")" < /dev/null; rc_is t14o $? 2
 chk t14o "這是 Lazy Pack 工具包自己"
 [ "$(hcount)" = "$n0" ] && cmp -s "$ST" "$S/st14.old" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14h-o] 防呆擋下時不該產生交接包或改狀態檔"; }
 rm -f "$ST"
+
+# 14p. 附件上限 handoff_max_attachment_mb：腳本複製到暫存的假 repo，參數檔換成跟正式值、預設值（10）都不同的 1 與 2，
+#      原始碼放 1.5 MB 壓不小的亂數檔（ZIP 在 1～2 MB 之間）：上限 1 → 超過，提示改放共用資料夾；上限 2 → 當附件；超出範圍的 0 → 照預設 10
+HC="$S/hcopy"; mkdir -p "$HC/lazy-pack" "$HC/config"; cp "$MJS" "$HC/lazy-pack/"
+BIG="$S/big"; cp -r "$FIX" "$BIG"; head -c 1572864 /dev/urandom > "$BIG/blob.bin"
+REAL_MB="$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")).handoff_max_attachment_mb)' "$(mp "$R/config/params.json")")"
+[ -n "$REAL_MB" ] && [ "$REAL_MB" != 1 ] && [ "$REAL_MB" != 2 ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14p] 正式參數檔的 handoff_max_attachment_mb（$REAL_MB）要跟測試用的 1、2 不同，請換測試的數字"; }
+phm() { sed -E "s/^(  \"handoff_max_attachment_mb\": )[0-9.]+/\1$1/" "$R/config/params.json" > "$HC/config/params.json"; }
+runhc() { touch "$S/run.marker"; node "$(mp "$HC/lazy-pack/code-and-ai-audit.mjs")" --handoff --target "$(mp "$BIG")" --system-code "LIM-$1" --system-name "上限測試" --owner "假負責人" --env dev < /dev/null > "$S/out.txt" 2>&1; }
+hdraft() { find "$HD" -maxdepth 1 -name "LIM-$1-*-email-draft.txt" -newer "$S/run.marker" | head -1; }
+phm 1
+grep -q '"handoff_max_attachment_mb": 1,$' "$HC/config/params.json" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14p] 自訂參數檔沒換到"; }
+runhc 1; rc_is t14p $? 0
+ZP="$(find "$HD" -maxdepth 1 -name 'LIM-1-*.zip' | head -1)"
+ZB="$( [ -n "$ZP" ] && wc -c < "$ZP" | tr -d ' ')"
+[ -n "$ZB" ] && [ "$ZB" -gt 1048576 ] && [ "$ZB" -le 2097152 ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14p] ZIP 應在 1～2 MB 之間（$ZB 位元組），測資前提不成立"; }
+chk t14p "超過信件附件上限 1 MB（config/params.json 的 handoff_max_attachment_mb）"
+chk t14p "放到共用資料夾，在內文填上位置（不當附件）"
+D1="$(hdraft 1)"
+fchk t14p-att "$D1" "^附件：不附檔（LIM-1-.*\.zip 有 [0-9.]* MB，超過附件上限 1 MB"
+fchk t14p-body "$D1" "已放在共用資料夾：（請填共用資料夾的位置）"
+phm 2; runhc 2; rc_is t14q $? 0
+nochk t14q "超過信件附件上限"
+chk t14q "3. 附件：LIM-2-"
+fchk t14q-att "$(hdraft 2)" "^附件：LIM-2-.*\.zip（[0-9.]* MB，和這份草稿在同一個資料夾）$"
+phm 0; runhc 0; rc_is t14r $? 0
+chk t14r "handoff_max_attachment_mb=0 缺漏或超出範圍 (1~1000)，這次照預設值 10 跑"
+nochk t14r "超過信件附件上限"
 
 echo "PASS=$pass FAIL=$fail SKIP=$skip"
 [ "$fail" -eq 0 ] && [ "$skip" -eq 0 ]
