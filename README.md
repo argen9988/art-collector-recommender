@@ -28,6 +28,7 @@
 | **遇到不懂或想暫緩的項目** | • 「這一項我看不懂，請用白話文跟我解釋選哪個比較好？」<br>• 「這一項我今天先不做，**幫我跳過**，先做下一項」 |
 | **精算每月雲端帳單** | • 「**幫我精算目前開了哪些雲端服務、一個月總共要花多少錢？**」 |
 | **只檢查不修改（唯讀體檢）** | • 「先幫我**只檢查不修改**，看看目前哪幾項合格、哪幾項還沒設」 |
+| **打包交給資訊單位再驗證** | • 「**幫我打包給資訊單位**，他們要用自架弱掃平台再驗證」<br>• 「**記下弱掃結果在** <位置>」 |
 | **查看回報資訊相關權責單位的檔案** | • 「幫我打開最新的**單次階段報告**或**全部執行總報告**，我要傳給資訊相關權責單位」 |
 
 ---
@@ -129,6 +130,23 @@ node lazy-pack/code-and-ai-audit.mjs --report-problem --note "第二階段跑到
 
 ---
 
+## 📦 交給資訊權責單位：交接包（用自架弱掃平台再驗證）
+
+第三階段做完後，要請資訊相關權責單位用自架弱掃平台再驗一次時，跟 AI 說「**幫我打包給資訊單位**」即可。背後做的事：
+
+- **打包**：`--handoff --target "<原始碼資料夾>"` 先重跑 3-1，掃到寫死的金鑰（`SRC-SECRET`）整包不出（結束碼 1），要先移除、已外流的金鑰要作廢重發。通過後產出 `reports/handoff/<系統代號>-<時間>/`（`manifest.json`、`findings.json`、`full-execution-report.md`、`source.zip`、`README.md`）與同名 ZIP；`source.zip` 排除 `.env*`、`.git`、`node_modules`、`.next`。
+- **要問您四件事**：系統名稱、系統代號、系統負責人、環境（正式或 dev）；問過就記下，下次不再問（也可用 `--system-name`、`--system-code`、`--owner`、`--env` 帶入）。
+- **信件草稿**：另寫 `reports/handoff/<系統代號>-<時間>-email-draft.txt`。腳本不會寄信，由您寄；收件人信箱不寫在程式裡，設環境變數 `LAZY_PACK_REPORT_TO` 會帶入草稿（交接包要不要寄給和問題回報同一個信箱，還沒跟資訊單位確認）。**測試帳號不放進交接包與信裡，另外交給資訊單位。**
+- **ZIP 太大**：超過 `config/params.json` 的 `handoff_max_attachment_mb`（現在是 10 MB，估的，實際上限要問資訊單位）時，不要當附件寄，改放資訊單位同意的共用資料夾，在信裡寫位置（草稿會自動改成這個寫法）。
+- **驗完之後**：拿到最終弱掃結果的位置，跟 AI 說「**記下弱掃結果在 <位置>**」，AI 會執行 `--platform-result`（要單獨用），累計總報告的「自架平台驗證」一行就從「未執行（選做）」改成「見最終弱掃結果 …」。
+
+```bash
+node lazy-pack/code-and-ai-audit.mjs --handoff --target "<藏家系統原始碼路徑>"
+node lazy-pack/code-and-ai-audit.mjs --platform-result "<最終弱掃結果的位置>"
+```
+
+---
+
 ## 🛠️ 五、 進階：手動執行指令參考（由 AI 自動代跑，人類無須背誦）
 
 ```bash
@@ -149,6 +167,8 @@ node lazy-pack/code-and-ai-audit.mjs --source github --repo "<GitHub 網址>" --
 node lazy-pack/code-and-ai-audit.mjs --target "<藏家系統原始碼路徑>" --run-ai-eval         # 已知資料夾時
 node lazy-pack/code-and-ai-audit.mjs --eval-only --url "<Cloud Run 網址>"                  # 20 題直接打真實線上網站（只考題、不掃原始碼）
 node lazy-pack/code-and-ai-audit.mjs --web-check --url "<Cloud Run 網址>"    # 只跑 3-3 網址預檢＋3-4 Observatory（送出主機名稱前會先問；使用者已同意送出才加 --observatory）
+node lazy-pack/code-and-ai-audit.mjs --handoff --target "<原始碼路徑>"     # 產生交接包與信件草稿（見上一節；掃到寫死的金鑰整包不出）
+node lazy-pack/code-and-ai-audit.mjs --platform-result "<位置>"           # 資訊單位驗完後，記下最終弱掃結果的位置（要單獨用）
 node lazy-pack/code-and-ai-audit.mjs --image-scan                         # 只跑 3-5 映像檔漏洞掃描（會花錢的開通與立即掃描要先問您；同意才加 --enable-image-scan、--scan-now）
 ```
 
