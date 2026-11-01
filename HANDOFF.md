@@ -1,50 +1,50 @@
-# 交接：Lazy Pack 待辦清空，下一步整輪真雲端驗收（Antigravity）
+# 交接：真雲端 Stage 1 通過、Stage 2 試錯與加固全閉環驗證，下一步早晨確認 Stage 2 並進入 Stage 3
 
-> 寫於 2026-11-01 16:15（Windows，分支 master）。開工時說「開工」或打 /resume-work 讀這份。
+> 寫於 2026-11-02 01:38（Windows，分支 master）。開工時說「開工」或打 /resume-work 讀這份。
 
 ## 下一步
 
-1. 整輪真雲端驗收（第一、二、三階段一次驗完，含 `--handoff` 一輪）：**到 Antigravity（agy）開新 session，用 Gemini Flash（High）做，使用者要在場**。開工讀這份，照 `D:\Dev\company\art-collector-recommender\AGENT_SETUP_雲端資安設定與驗收指南.md` 從第一階段跑到第三階段，再跑 `--handoff`。Flash 當審閱者曾有講錯的紀錄，每個結論先對照程式查證。建議用拋棄式 GCP 專案（`docs/todo-plan.md`「【真雲端驗收】」，含兩件假 gcloud 測不出來的事：第二階段 `sql instances patch` 在管線下會不會照常問 `(Y/n)`、Git Bash 按 Ctrl-C 後紀錄最後幾行有沒有掉）。驗收時順便查「【待確認】真實推薦端點的路徑與格式」（不同就調 `askOnline` 或用 `--api-path`）。建議模型與努力程度：照使用者指定（Gemini Flash、High）；驗收發現要改程式時回 Claude 用 Sonnet、medium（範圍清楚的 bug）或主力模型（設計問題）
-2. 驗收完照 `reflect`、`project-log` Skill 寫這輪的 reflection 與專案紀錄（公司專案：完整版 `D:\Dev\project-records\company\art-collector-recommender\`，去識別化版先給使用者看）。上一輪（小補強）的已寫好
+1. 早晨確認第二階段加固（或由使用者手動對照 Console 點選測試）並重新複查合格：沙盒專案 `art-rec-test-960198` 目前處於還原未加固之基準狀態（報告 `reports/stage-2-report-20261102-013422.md`）；使用者確認後，執行加固並複查輸出合格報告。建議模型：Gemini Flash（High）或 Sonnet，需使用者在場。
+2. 執行第三階段上線前總體檢：於本機執行 `node lazy-pack/code-and-ai-audit.mjs --run-ai-eval`，完成 3-1 靜態金鑰掃描、3-2 20 題 AI 紅隊驗收、3-3 網址預檢與 3-5 映像檔掃描，產出累計總報告。
+3. 執行 `--handoff` 交接包打包驗證，並在全流程完成後關閉拋棄式專案 `art-rec-test-960198`。
 
 ## 目標與做到哪
 
-讓沒有資訊背景的執行者把 Lazy Pack 交給 AI Agent 就能跑完三階段檢查，出錯能回報，檢查結果能用交接包交給資訊同仁再用自架平台驗證。所有程式與文件待辦都做完，只剩真雲端驗收。`tests/test-code-audit.sh` 665 項、`tests/test-gcp-setup.sh` 296 項全過，工作區乾淨。
+在拋棄式真雲端沙盒專案（`art-rec-test-960198`）中驗證 Lazy Pack 全流程。
+- 第一階段：100% 驗收通過（Paid Tier、雙 Owner、預算/配額設定）。
+- 第二階段：已完成「未加固試錯 ➔ 詳細步驟加固 ➔ 複查合格」全閉環測試，並依實測截圖校正全套 Console SOP。收工前已將環境重置為未加固狀態，基準報告為 `reports/stage-2-report-20261102-013422.md`。
 
 ## 已完成
 
-- `NT$0` 預設值被展開成腳本路徑的 bug 修好，測試 16g 加 3 項（`1c8d25b`）
-- manifest 欄位表寫進弱掃規格第 4 節（vulnerability-scan-summary 另一個 repo，已推送）
-- `--url` 線上測試遇 429／5xx 重送一次、連續 3 題失敗中止（新參數 `eval_abort_after_failures`、`eval_retry_after_max_sec`）；findings.json 寫不進去的測試 13k；改壞驗證都抓到。施工紀錄 `D:\Dev\company\art-collector-recommender\docs\worklog\2026-11.md` 最後兩段
+- `lazy-pack/gcp-setup-and-check.sh` 修復 Git Bash Windows `/dev/fd/3`、billing GA 指令與防阻塞傳參（`832c852`）
+- `AGENT_SETUP_雲端資安設定與驗收指南.md` 補全 Stage 1 與 Stage 2 的 5 大項最新 GCP 繁中介面與操作 SOP（`832c852`）
+- 實證 Cloud SQL 拔除公網 IP 限制（觸發 HTTP 400：必須有 Private IP 或 PSC）與 Cloud Run 掛載連線代理通道（`832c852`）
+- `D:\Dev\personal\ai-companion\docs\todo-plan.md` 寫入「主動連線實測最新版本」規範與「全臨界點主動試錯」標準（本機 commit `4a546fa`）
 
 ## 還沒做完
 
-- 上面「下一步」各項
-- 真實推薦端點路徑與格式（`docs/todo-plan.md`「【待確認】」，驗收時查）；Firebase 檢測差異（使用者說之後再談）
-- 沒測：打包中途失敗清半成品、`--platform-result` 寫總報告失敗的分支（未驗證）
-- 審閱錯誤回報時沒改的小邊界（家目錄太短、`ghp_`／`sk-` 規則、SKIP 算失敗等）：只記在施工紀錄
-- 使用者自己清空資源回收筒才會釋放 C 槽空間
-- Codex 當主線呼叫別家的驗證：`D:\Dev\personal\ai-companion\docs\todo-plan.md`「反方向派工」，等 Codex 訂閱
-- 弱掃那邊照規格做 Skill 與懶人包、合併產生器（在 vulnerability-scan-summary 另開 session）
+- 早上使用者確認第二階段加固並跑出最終合格報告
+- 第三階段原始碼掃描與 20 題 AI 驗收（`code-and-ai-audit.mjs --run-ai-eval`）
+- `--handoff` 產出交接包並驗收 manifest
+- 驗收完畢後關閉拋棄式專案 `gcloud projects delete art-rec-test-960198 --quiet`
+- 驗收完照 `reflect`、`project-log` 記歷程；`ai-companion` 待推上 GitHub（等與遠端同步）
 
 ## 這次定下的決策
 
-- 整輪真雲端驗收由 Antigravity 的 Gemini Flash（High）做，使用者在場（使用者 2026-11-01 指定）
-- 429／5xx：等 Retry-After（上限 60 秒，沒給等 2 秒）重送一次，連續 3 題逾時或 429／5xx 就中止（數字在 `config/params.json`）
-- 公司專案、推送：自動
+- 雲端 Console 導引必須主動連線實測最新繁中介面與按鈕標籤，嚴禁憑舊記憶推測（2026-11-02 使用者定）
+- 測試與驗收必須跑過「刻意營造漏洞 ➔ 體檢抓出問題 ➔ 詳細步驟加固 ➔ 複查驗收全綠燈」全閉環（2026-11-02 使用者定）
+- Cloud SQL 關閉公網 IP 前必須先配置 VPC / Private IP，否則 GCP API 拒絕執行（HTTP 400）；生產環境改走 Cloud SQL Auth Proxy
 
 ## 相關檔案
 
-- `D:\Dev\company\art-collector-recommender\lazy-pack\code-and-ai-audit.mjs`：`askOnline`、`runAiEvaluation`、`runHandoff`
-- `D:\Dev\company\art-collector-recommender\lazy-pack\gcp-setup-and-check.sh`：第一、二階段與費用精算
-- `D:\Dev\company\art-collector-recommender\docs\todo-plan.md`：【真雲端驗收】、【待確認】
-- `D:\Dev\company\art-collector-recommender\AGENT_SETUP_雲端資安設定與驗收指南.md`：驗收照這份跑
+- `D:\Dev\company\art-collector-recommender\AGENT_SETUP_雲端資安設定與驗收指南.md`：最新核實之操作指南
+- `D:\Dev\company\art-collector-recommender\lazy-pack\gcp-setup-and-check.sh`：雲端檢查與設定腳本
+- `D:\Dev\company\art-collector-recommender\reports\stage-2-report-20261102-013422.md`：目前基準未加固報告
+- `D:\Dev\company\art-collector-recommender\reports\full-execution-report.md`：累計總報告
 
 ## 踩過的坑
 
-- 跑測試要讓工具指令本身就是測試指令，不要在指令裡用 `&` 丟背景；兩支測試不同時跑：會互相改寫 `reports/`。被殺掉沒還原時，用最早那份 `%TEMP%\tmp.*\` 的 `state.bak`、`full.bak` 還原
-- Python `subprocess.run(capture_output=True, timeout=…)` 跑含假伺服器的測試，逾時後 node 假伺服器握著管線會卡死：改用 bash `timeout` 加輸出寫檔
-- `tests/test-gcp-setup.sh` 第 16 段的 sed 假設 `usd_twd_rate` 是 `config/params.json` 最後一行（沒有逗號）：新參數加在它前面
-- 指令裡有連續兩個反斜線會被 Bash 工具的 hook 擋下：用 Write 寫成檔案再執行
-- 這個 repo 是公開的 GitHub：不寫內部主機名稱、內網位址、帳號 email、帳單帳戶編號
-- 真雲端驗收要開拋棄式專案，跑完關閉專案（估 NT$0～50）；立即掃描在 Windows 版 gcloud 不支援
+- MSYS2 Git Bash 在 Windows 管道下沒有 `/dev/fd/3`：改用 `tee >(lp_redact >> "$file")`
+- GCP Cloud SQL 在沒有 Private IP / PSC 時無法執行 `--no-assign-ip`，會報錯 HTTP 400
+- Cloud SQL「安全性」分頁的儲存按鈕為底部動態浮動列，未點擊切換選項前不會顯示
+- Cloud Scheduler 網址必須輸入完整 HTTPS 絕對網址；自訂密鑰需點「HTTP 標頭 > + 新增標頭」，下方的「驗證標頭」下拉選單需選「無」
