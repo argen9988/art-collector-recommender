@@ -312,6 +312,14 @@ for k in SYSTEM_NAME SYSTEM_CODE OWNER ENV; do
   grep -qx "SAVED_HANDOFF_$k=\"\"" "$ST16" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t16g] 舊狀態檔缺 SAVED_HANDOFF_$k 時要寫回空值"; }
 done
 grep -qx 'SAVED_PROJECT_ID="proj-a"' "$ST16" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t16g] 寫回後 SAVED_PROJECT_ID 不見了"; }
+# 缺 SAVED_VERTEX_STATUS／SAVED_EDM_STATUS 時的預設值：「NT$0」不能被展開成腳本路徑（$0），狀態檔與累計總報告都要是原文
+grep -qxF 'SAVED_VERTEX_STATUS="未啟用（維持 AI Studio Paid Tier，NT$0 底租）"' "$ST16" \
+  && grep -qxF 'SAVED_EDM_STATUS="未啟用（維持人工操作或免費額度內 NT$0）"' "$ST16" \
+  && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t16g] 缺欄位時 Vertex／EDM 預設值要逐字含 NT\$0：$(grep -E 'SAVED_(VERTEX|EDM)' "$ST16" | tr '\n' ' ')"; }
+grep -qF '未啟用（維持 AI Studio Paid Tier，NT$0 底租）' "$R16/reports/full-execution-report.md" \
+  && grep -qF '未啟用（維持人工操作或免費額度內 NT$0）' "$R16/reports/full-execution-report.md" \
+  && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t16g] 累計總報告第 6、7 項的預設狀態要逐字含 NT\$0"; }
+! grep -qF 'NT/' "$R16/reports/full-execution-report.md" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t16g] 累計總報告不該有被展開成路徑的 NT/…"; }
 # 16h. 欄位值含等號、單引號、百分比、星號、井號（mjs 只擋雙引號、反斜線、$、反引號）：逐字寫回
 printf 'SAVED_HANDOFF_SYSTEM_NAME="a=b '"'"'x'"'"' 100%%* #1"\nSAVED_HANDOFF_OWNER="王=小明"\n' > "$ST16"
 run16; rc_is t16h $? 0
