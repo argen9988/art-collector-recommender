@@ -5,12 +5,12 @@
 ## 下一步
 
 1. 整輪真雲端驗收（第一、二、三階段一次驗完，含 `--handoff` 一輪）：使用者指定由 Antigravity（agy）用 Gemini Flash（High）做，要使用者在場；Flash 當審閱者曾有講錯的紀錄，每個結論先對照程式查證。驗收前先修 `gcp-setup-and-check.sh` 預設值 `NT$0` 被展開成腳本路徑（待辦【小補強】；會把執行者的路徑帶進交接包）。建議模型與努力程度：`NT$0` 那個小修用 Sonnet、medium（範圍清楚的 bug，要加測試）；真雲端驗收照使用者指定
-2. 要問資訊相關權責單位：附件上限實際數字、交接包收件人是否同錯誤回報的信箱（D17「未定」，程式與文件都已註明暫定）
+2. 資訊單位回覆的兩件事已處理（D19）：附件上限就是 10 MB，超過改放雲端硬碟；交接包收件人可能和錯誤回報不同，加了 `LAZY_PACK_HANDOFF_TO`（沒設沿用 `LAZY_PACK_REPORT_TO`）。收件人信箱本身還是由使用者自己設環境變數
 3. manifest 欄位名稱寫進弱掃規格第 4 節（在 vulnerability-scan-summary 另開 session 做）
 
 ## 目標與做到哪
 
-讓沒有資訊背景的執行者把 Lazy Pack 交給 AI Agent 就能跑完三階段檢查，出錯能回報，檢查結果能用交接包交給資訊同仁再用自架平台驗證。錯誤回報、交接包 B1、B2、C 都做完，用 Sonnet 審過一輪（9 份）、發現已照改（D18）；`tests/test-code-audit.sh` 631 項、`tests/test-gcp-setup.sh` 293 項全過。剩整輪真雲端驗收。
+讓沒有資訊背景的執行者把 Lazy Pack 交給 AI Agent 就能跑完三階段檢查，出錯能回報，檢查結果能用交接包交給資訊同仁再用自架平台驗證。錯誤回報、交接包 B1、B2、C 都做完，用 Sonnet 審過一輪（9 份）、發現已照改（D18）；`tests/test-code-audit.sh` 638 項、`tests/test-gcp-setup.sh` 293 項全過。剩整輪真雲端驗收。
 
 ## 已完成
 
@@ -31,6 +31,7 @@
 ## 這次定下的決策
 
 - 交接包「整包不出」看實際進包的檔，排除不分大小寫並加金鑰檔，報告先遮蔽（使用者 2026-11-01 說「改」；D18 在 `D:\Dev\company\art-collector-recommender\docs\decisions\2026-11.md`）
+- 附件上限 10 MB（超過改雲端硬碟）、交接包收件人可能不同（使用者 2026-11-01 回覆；D19，同一個檔）
 - 整輪真雲端驗收由 Antigravity 的 Gemini Flash（High）做（使用者 2026-11-01 指定）
 - 公司專案、推送：自動
 

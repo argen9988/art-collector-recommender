@@ -30,8 +30,8 @@
  *   產出 reports/handoff/<系統代號>-<時間>/（manifest.json、findings.json、full-execution-report.md、source.zip、README.md）與同名 ZIP，
  *   格式照 vulnerability-scan-summary 規格第 4 節；source.zip 一律排除 .env*、.git、node_modules、.next 與捷徑；ZIP 用 node 內建的 zlib 產生。
  *   系統名稱、系統代號、負責人、環境：參數 → 狀態檔記下的（SAVED_HANDOFF_*）→ 在終端機依序問（管線時每題一行，順序是原始碼確認（沒帶 --target 時）、名稱、代號、負責人、環境），
- *   問到的記進狀態檔；缺了就結束碼 2。打包成功後另寫信件草稿 reports/handoff/<系統代號>-<時間>-email-draft.txt（不寄出；收件人同錯誤回報用 LAZY_PACK_REPORT_TO，
- *   交接包要不要寄給同一個信箱還沒定，草稿裡註明）；ZIP 超過 config/params.json 的 handoff_max_attachment_mb 時提示改放共用資料夾，草稿改寫成附上共用資料夾的位置。
+ *   問到的記進狀態檔；缺了就結束碼 2。打包成功後另寫信件草稿 reports/handoff/<系統代號>-<時間>-email-draft.txt（不寄出；收件人用 LAZY_PACK_HANDOFF_TO，沒設時沿用錯誤回報的 LAZY_PACK_REPORT_TO，
+ *   兩者可以不同，草稿裡提醒寄出前確認）；ZIP 超過 config/params.json 的 handoff_max_attachment_mb（10 MB，資訊單位確認過）時提示改放雲端硬碟（或共用資料夾），草稿改寫成附上連結或位置。
  *   測試時用 LAZY_PACK_HANDOFF_DIR 把交接包指到暫存資料夾
  *
  * 3-1 的結果也寫進 reports/findings.json（D17，類別代號 SRC-*，target 是原始碼裡的相對路徑；--self-test 不寫），只換掉舊的 SRC- 部分
@@ -2091,7 +2091,7 @@ async function runHandoff(cliArgs) {
   }
   if (over) {
     console.log(` ⚠️ ZIP 有 ${mbText(zipBytes)} MB，超過信件附件上限 ${maxMb} MB（config/params.json 的 handoff_max_attachment_mb）：`);
-    console.log('    請不要當附件寄，改放到資訊相關權責單位同意的共用資料夾，在信裡寫上位置。');
+    console.log('    請不要當附件寄，改放到雲端硬碟（或資訊相關權責單位同意的共用資料夾），在信裡寫上連結或位置。');
   }
   if (draftOk) console.log(` • 信件草稿（主旨與內文，不會自動寄出）：${draftPath}`);
   console.log('');
@@ -2099,7 +2099,7 @@ async function runHandoff(cliArgs) {
   console.log(`   1. 開一封新信，收件人：${draft.to}`);
   console.log(`   2. 主旨：${draft.subject}`);
   console.log(over
-    ? `   3. 把 ${path.basename(zipPath)} 放到共用資料夾，在內文填上位置（不當附件）`
+    ? `   3. 把 ${path.basename(zipPath)} 放到雲端硬碟（或共用資料夾），在內文填上連結或位置（不當附件）`
     : `   3. 附件：${path.basename(zipPath)}（位置見上面）`);
   console.log(draftOk ? '   4. 內文可複製草稿檔裡的文字' : '   4. 內文寫系統名稱、受測網址，並請對方驗證完回覆最終弱掃結果的位置');
   console.log('   測試帳號不要寫在信裡，另外交給資訊相關權責單位。');
@@ -2108,16 +2108,16 @@ async function runHandoff(cliArgs) {
 
 const mbText = (bytes) => (bytes / 1024 / 1024).toFixed(2);
 
-// 交接包的信件草稿：收件人走 LAZY_PACK_REPORT_TO（同錯誤回報；交接包要不要寄同一個信箱還沒定，草稿裡註明），檔名只寫名稱不寫完整路徑（路徑裡有電腦使用者名稱）
+// 交接包的信件草稿：收件人走 LAZY_PACK_HANDOFF_TO，沒設沿用錯誤回報的 LAZY_PACK_REPORT_TO（兩者可能不同，草稿裡提醒確認），檔名只寫名稱不寫完整路徑（路徑裡有電腦使用者名稱）
 function handoffEmailDraft(m, counts, total, zipName, zipBytes, maxMb, over) {
-  const to = process.env.LAZY_PACK_REPORT_TO || '（請填資訊相關權責單位的信箱；設環境變數 LAZY_PACK_REPORT_TO 就會自動帶入）';
+  const to = process.env.LAZY_PACK_HANDOFF_TO || process.env.LAZY_PACK_REPORT_TO || '（請填資訊相關權責單位的信箱；設環境變數 LAZY_PACK_HANDOFF_TO 就會自動帶入）';
   const { human } = nowStamp();
   const subject = `【Lazy Pack 交接包】${m.system_name}（${m.system_code}，${envLabel(m)}）請協助用自架弱掃平台驗證（${human}）`;
   const body = [
     '您好，',
     '',
     over
-      ? `「${m.system_name}」的交接包（${zipName}，${mbText(zipBytes)} MB）超過信件附件上限，已放在共用資料夾：（請填共用資料夾的位置），請協助用自架弱掃平台再驗證。`
+      ? `「${m.system_name}」的交接包（${zipName}，${mbText(zipBytes)} MB）超過信件附件上限，已放在雲端硬碟（或共用資料夾）：（請填連結或位置），請協助用自架弱掃平台再驗證。`
       : `附上「${m.system_name}」的交接包（${zipName}），請協助用自架弱掃平台再驗證。`,
     '',
     `- 系統代號：${m.system_code}（${envLabel(m)}）`,
@@ -2131,11 +2131,11 @@ function handoffEmailDraft(m, counts, total, zipName, zipBytes, maxMb, over) {
     '謝謝',
   ].join('\n');
   const attach = over
-    ? `附件：不附檔（${zipName} 有 ${mbText(zipBytes)} MB，超過附件上限 ${maxMb} MB；請放到共用資料夾，在內文填上位置）`
+    ? `附件：不附檔（${zipName} 有 ${mbText(zipBytes)} MB，超過附件上限 ${maxMb} MB；請放到雲端硬碟或共用資料夾，在內文填上連結或位置）`
     : `附件：${zipName}（${mbText(zipBytes)} MB，和這份草稿在同一個資料夾）`;
   const text = [
     `收件人：${to}`,
-    '（收件人沿用錯誤回報的環境變數 LAZY_PACK_REPORT_TO；交接包要不要寄給同一個信箱，還沒跟資訊相關權責單位確認，寄出前請確認）',
+    '（收件人用環境變數 LAZY_PACK_HANDOFF_TO，沒設時沿用錯誤回報的 LAZY_PACK_REPORT_TO；交接包的收件人可能和錯誤回報不同，寄出前請確認）',
     `主旨：${subject}`,
     attach,
     '',

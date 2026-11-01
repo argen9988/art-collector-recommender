@@ -327,9 +327,9 @@
    - `--handoff` 只能搭配 `--target` 與上面四個參數，不能和其他旗標一起用。
 3. **產出**：`reports/handoff/<系統代號>-<時間>/`（`manifest.json`、`findings.json`、`full-execution-report.md`（沒有就不放）、`source.zip`、`README.md`）與同名 ZIP。`source.zip` 不分大小寫排除 `.env*`、`.git`、`node_modules`、`.next`、`.npmrc`、`*.pem`、`*.key`、`*.p12`、服務帳戶與 credentials 的 JSON 檔、捷徑；放進包的累計總報告已先遮掉電腦使用者名稱與信箱；測試帳號固定寫「由負責人另外提供」，**不要放進交接包或信裡，另外交給資訊單位**。
 4. **帶使用者寄信**：打包成功後另有信件草稿 `reports/handoff/<系統代號>-<時間>-email-draft.txt`（主旨、內文、附件說明）。
-   - 收件人沿用錯誤回報的環境變數 `LAZY_PACK_REPORT_TO`（公開 repo，信箱不寫在程式裡）；沒設時草稿寫「請填資訊相關權責單位的信箱」，請你問使用者。**交接包要不要寄給同一個信箱，還沒跟資訊單位確認**，草稿裡有註明，寄出前請使用者確認。
+   - 收件人用環境變數 `LAZY_PACK_HANDOFF_TO`，沒設時沿用錯誤回報的 `LAZY_PACK_REPORT_TO`（公開 repo，信箱不寫在程式裡）；兩個都沒設時草稿寫「請填資訊相關權責單位的信箱」，請你問使用者。**交接包的收件人可能和錯誤回報不同**，草稿裡有提醒，寄出前請使用者確認。
    - 幫使用者打開 `reports/handoff/` 與草稿，一步一步帶：開新信 → 填收件人 → 貼主旨與內文 → 附上 ZIP → 寄出。
-5. **ZIP 太大時**：ZIP 超過 `config/params.json` 的 `handoff_max_attachment_mb`（現在是 10，估的，實際上限要問資訊單位）時，腳本會提示「不要當附件寄」，草稿改成「不附檔」。請使用者把 ZIP 放到資訊單位同意的共用資料夾，在信裡填上位置；結束碼照樣是 0。
+5. **ZIP 太大時**：ZIP 超過 `config/params.json` 的 `handoff_max_attachment_mb`（現在是 10，資訊單位確認過的上限）時，腳本會提示「不要當附件寄」，草稿改成「不附檔」。請使用者把 ZIP 放到雲端硬碟（或資訊單位同意的共用資料夾），在信裡填上連結或位置；結束碼照樣是 0。
 6. **資訊單位驗完之後**：使用者拿到最終弱掃結果的位置後，單獨執行（不能搭配其他旗標）：
    ```bash
    node lazy-pack/code-and-ai-audit.mjs --platform-result "<最終弱掃結果的位置>"

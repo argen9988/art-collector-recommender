@@ -13,7 +13,7 @@
     "eval_request_timeout_sec": "第三階段 --url 線上測試每題等網站回應的秒數上限（超過算該題失敗），合法範圍 5～300，預設 30",
     "image_scan_usd_per_image": "細項 3-5 Artifact Analysis 每掃一份映像檔的費用（美元），合法範圍 0～10，預設 0.26（官方定價頁，自動掃描與立即掃描同價）",
     "image_scan_deploys_per_month": "細項 3-5 費用精算用的每月部署次數（每次部署掃一次），合法範圍 1～1000，預設 20",
-    "handoff_max_attachment_mb": "--handoff 交接包 ZIP 當信件附件的大小上限（MB），超過時提示改放共用資料夾；合法範圍 1～1000，預設 10（估的，實際數字要問資訊相關權責單位）",
+    "handoff_max_attachment_mb": "--handoff 交接包 ZIP 當信件附件的大小上限（MB），超過時提示改放雲端硬碟（或共用資料夾）；合法範圍 1～1000，預設 10（資訊相關權責單位 2026-11-01 確認的上限）",
     "usd_twd_rate": "美元換新台幣的匯率（估的，只用來精算費用），合法範圍 20～50，預設 32.5"
   },
   "budget_monthly_ntd": 1000,

@@ -28,7 +28,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 rm -f "$ST"   # 使用者狀態檔裡的真網址不能讓 3-2 測試打出去
-unset LAZY_PACK_API_TOKEN NODE_EXTRA_CA_CERTS
+unset LAZY_PACK_API_TOKEN NODE_EXTRA_CA_CERTS LAZY_PACK_HANDOFF_TO
 export LAZY_PACK_OBSERVATORY_API="http://127.0.0.1:1/never"   # 3-4 永遠打不到真的 Observatory
 unset LAZY_PACK_OBSERVATORY_ALLOW_LOCAL   # 平常的設定：本機與內網網址不送 Observatory（第 10 段要送給假伺服器時才設）
 chmod +x "$S/fakebin/gcloud"
@@ -977,7 +977,7 @@ chk t14b "信件草稿（主旨與內文，不會自動寄出）"
 chk t14b "主旨：【Lazy Pack 交接包】假系統 甲（FAKE-SYS，dev）"
 nochk t14b "超過信件附件上限"
 fchk t14b-to "$DRF" "^收件人：（請填資訊相關權責單位的信箱"
-fchk t14b-same "$DRF" "沿用錯誤回報的環境變數 LAZY_PACK_REPORT_TO；交接包要不要寄給同一個信箱，還沒跟資訊相關權責單位確認"
+fchk t14b-same "$DRF" "收件人用環境變數 LAZY_PACK_HANDOFF_TO，沒設時沿用錯誤回報的 LAZY_PACK_REPORT_TO；交接包的收件人可能和錯誤回報不同，寄出前請確認"
 fchk t14b-sub "$DRF" "^主旨：【Lazy Pack 交接包】假系統 甲（FAKE-SYS，dev）請協助用自架弱掃平台驗證"
 fchk t14b-att "$DRF" "^附件：$(basename "$Z")（[0-9.]* MB，和這份草稿在同一個資料夾）$"
 fchk t14b-url "$DRF" "^- 受測網址：https://fake-site.example.invalid$"
@@ -1120,10 +1120,10 @@ ZP="$(find "$HD" -maxdepth 1 -name 'LIM-1-*.zip' | head -1)"
 ZB="$( [ -n "$ZP" ] && wc -c < "$ZP" | tr -d ' ')"
 [ -n "$ZB" ] && [ "$ZB" -gt 1048576 ] && [ "$ZB" -le 2097152 ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14p] ZIP 應在 1～2 MB 之間（$ZB 位元組），測資前提不成立"; }
 chk t14p "超過信件附件上限 1 MB（config/params.json 的 handoff_max_attachment_mb）"
-chk t14p "放到共用資料夾，在內文填上位置（不當附件）"
+chk t14p "放到雲端硬碟（或共用資料夾），在內文填上連結或位置（不當附件）"
 D1="$(hdraft 1)"
 fchk t14p-att "$D1" "^附件：不附檔（LIM-1-.*\.zip 有 [0-9.]* MB，超過附件上限 1 MB"
-fchk t14p-body "$D1" "已放在共用資料夾：（請填共用資料夾的位置）"
+fchk t14p-body "$D1" "已放在雲端硬碟（或共用資料夾）：（請填連結或位置）"
 fnochk t14p-path "$D1" "$(basename "$S")"   # 超過上限的草稿也不寫完整路徑
 phm 2; runhc 2; rc_is t14q $? 0
 nochk t14q "超過信件附件上限"
@@ -1185,6 +1185,14 @@ if command -v unzip >/dev/null 2>&1 && [ -f "$RZ" ]; then
 else
   skip=$((skip+1)); echo "SKIP [t14v] 沒有 unzip 或找不到 ZIP"
 fi
+
+# 14w. 收件人：LAZY_PACK_HANDOFF_TO 優先，沒設才用錯誤回報的 LAZY_PACK_REPORT_TO（兩者可以不同）
+LAZY_PACK_HANDOFF_TO="handoff@corp.example" LAZY_PACK_REPORT_TO="report@corp.example" run --handoff --target "$(mp "$C")" --system-name "收件人" --system-code TO-A --owner "假負責人" --env 正式 < /dev/null; rc_is t14w1 $? 0
+chk t14w1 "收件人：handoff@corp.example"; nochk t14w1 "report@corp.example"
+fchk t14w1-file "$(find "$HD" -maxdepth 1 -name 'TO-A-*-email-draft.txt' | head -1)" "^收件人：handoff@corp.example$"
+LAZY_PACK_REPORT_TO="report@corp.example" run --handoff --target "$(mp "$C")" --system-name "收件人" --system-code TO-B --owner "假負責人" --env 正式 < /dev/null; rc_is t14w2 $? 0
+chk t14w2 "收件人：report@corp.example"
+fchk t14w2-file "$(find "$HD" -maxdepth 1 -name 'TO-B-*-email-draft.txt' | head -1)" "^收件人：report@corp.example$"
 
 echo "PASS=$pass FAIL=$fail SKIP=$skip"
 [ "$fail" -eq 0 ] && [ "$skip" -eq 0 ]
