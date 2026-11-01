@@ -4,9 +4,8 @@
 
 ## 下一步
 
-1. 補這兩次的 reflection 與專案歷程的去識別化版進 second-brain（完整版：`D:\Dev\project-records\company\art-collector-recommender\reflections\2026-11-01_windows_feature-design.md`、`D:\Dev\project-records\company\art-collector-recommender\reflections\2026-11-01_windows_feature-design-2.md`、`D:\Dev\project-records\company\art-collector-recommender\journey\2026-11-01_windows.md` 的兩段，歷程標 `second_brain: pending`）；要使用者先看過。建議模型與努力程度：主力模型、medium（公司資料的去識別化判斷）；要使用者在場
-2. 【交接包】C：`D:\Dev\company\art-collector-recommender\AGENT_SETUP_雲端資安設定與驗收指南.md` 加「交給資訊權責單位」一節（含 `--handoff`、信件草稿、附件上限超過時改放共用資料夾、`--platform-result`），`README.md` 跟著改；內容照 `AGENTS.md`「交接包 `--handoff`」那一項。建議模型與努力程度：Sonnet、medium（照現況改寫文件；下一段用主力模型抽查）；不用使用者在場
-3. B1＋B2＋C 照 `review-changes` 審一輪：由使用者在 Antigravity 開這個專案、當主線用 Gemini 3.8 Flash（High）做（使用者 2026-11-01 定；Flash 當審閱者 2026-10-30 在 medium 實測有 2 點講錯，High 沒測過，每個問題先對照程式查證再改）；之後整輪真雲端驗收，要使用者在場
+1. 【交接包】C：`D:\Dev\company\art-collector-recommender\AGENT_SETUP_雲端資安設定與驗收指南.md` 加「交給資訊權責單位」一節（含 `--handoff`、信件草稿、附件上限超過時改放共用資料夾、`--platform-result`），`README.md` 跟著改；內容照 `AGENTS.md`「交接包 `--handoff`」那一項。建議模型與努力程度：Sonnet、medium（照現況改寫文件；下一段用主力模型抽查）；不用使用者在場
+2. B1＋B2＋C 照 `review-changes` 審一輪：由使用者在 Antigravity 開這個專案、當主線用 Gemini 3.8 Flash（High）做（使用者 2026-11-01 定；Flash 當審閱者 2026-10-30 在 medium 實測有 2 點講錯，High 沒測過，每個問題先對照程式查證再改）；之後整輪真雲端驗收，要使用者在場
 
 ## 目標與做到哪
 
