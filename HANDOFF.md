@@ -5,7 +5,7 @@
 ## 下一步
 
 1. 整輪真雲端驗收（第一、二、三階段一次驗完，含 `--handoff` 一輪）：**到 Antigravity（agy）開新 session，用 Gemini Flash（High）做，使用者要在場**。開工讀這份，照 `D:\Dev\company\art-collector-recommender\AGENT_SETUP_雲端資安設定與驗收指南.md` 從第一階段跑到第三階段，再跑 `--handoff`。Flash 當審閱者曾有講錯的紀錄，每個結論先對照程式查證。建議用拋棄式 GCP 專案（`docs/todo-plan.md`「【真雲端驗收】」，含兩件假 gcloud 測不出來的事：第二階段 `sql instances patch` 在管線下會不會照常問 `(Y/n)`、Git Bash 按 Ctrl-C 後紀錄最後幾行有沒有掉）。驗收時順便查「【待確認】真實推薦端點的路徑與格式」（不同就調 `askOnline` 或用 `--api-path`）。建議模型與努力程度：照使用者指定（Gemini Flash、High）；驗收發現要改程式時回 Claude 用 Sonnet、medium（範圍清楚的 bug）或主力模型（設計問題）
-2. 這個 session 的 reflection 與專案紀錄還沒寫（公司專案：完整版寫到 `D:\Dev\project-records\company\art-collector-recommender\`，去識別化版寫進 second-brain 前先給使用者看）；建議驗收完一起寫
+2. 驗收完照 `reflect`、`project-log` Skill 寫這輪的 reflection 與專案紀錄（公司專案：完整版 `D:\Dev\project-records\company\art-collector-recommender\`，去識別化版先給使用者看）。上一輪（小補強）的已寫好
 
 ## 目標與做到哪
 
