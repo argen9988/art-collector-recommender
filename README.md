@@ -134,11 +134,11 @@ node lazy-pack/code-and-ai-audit.mjs --report-problem --note "第二階段跑到
 
 第三階段做完後，要請資訊相關權責單位用自架弱掃平台再驗一次時，跟 AI 說「**幫我打包給資訊單位**」即可。背後做的事：
 
-- **打包**：`--handoff --target "<原始碼資料夾>"` 先重跑 3-1，掃到寫死的金鑰（`SRC-SECRET`）整包不出（結束碼 1），要先移除、已外流的金鑰要作廢重發。通過後產出 `reports/handoff/<系統代號>-<時間>/`（`manifest.json`、`findings.json`、`full-execution-report.md`、`source.zip`、`README.md`）與同名 ZIP；`source.zip` 排除 `.env*`、`.git`、`node_modules`、`.next`。
-- **要問您四件事**：系統名稱、系統代號、系統負責人、環境（正式或 dev）；問過就記下，下次不再問（也可用 `--system-name`、`--system-code`、`--owner`、`--env` 帶入）。
-- **信件草稿**：另寫 `reports/handoff/<系統代號>-<時間>-email-draft.txt`。腳本不會寄信，由您寄；收件人信箱不寫在程式裡，設環境變數 `LAZY_PACK_REPORT_TO` 會帶入草稿（交接包要不要寄給和問題回報同一個信箱，還沒跟資訊單位確認）。**測試帳號不放進交接包與信裡，另外交給資訊單位。**
+- **打包**：`--handoff --target "<原始碼資料夾>"` 先重跑 3-1，並檢查要放進 `source.zip` 的每個文字檔；有寫死的金鑰或資料庫密碼就整包不出（結束碼 1），要先移除、已外流的金鑰要作廢重發。通過後產出 `reports/handoff/<系統代號>-<時間>/`（`manifest.json`、`findings.json`、`full-execution-report.md`（這台電腦沒跑過任何階段就不放）、`source.zip`、`README.md`）與同名 ZIP。`source.zip` 不分大小寫排除 `.env*`、`.git`、`node_modules`、`.next`、`.npmrc`、`*.pem`、`*.key`、`*.p12`、服務帳戶與 credentials 的 JSON 檔、捷徑；放進包的累計總報告已先遮掉電腦使用者名稱與信箱。
+- **要問您四件事**：系統名稱、系統代號、系統負責人、環境（正式或 dev）；問過就記下，下次不再問（也可用 `--system-name`、`--system-code`、`--owner`、`--env` 帶入）。缺任何一項就不打包（結束碼 2）；沿用上次原始碼時回答 n 也不打包（結束碼 2）。
+- **信件草稿**：另寫 `reports/handoff/<系統代號>-<時間>-email-draft.txt`。腳本不會寄信，由您寄。收件人信箱不寫在程式裡，設環境變數 `LAZY_PACK_REPORT_TO` 會帶入草稿；**不會設也沒關係**，草稿會留一行「請填資訊相關權責單位的信箱」讓您自己填（交接包要不要寄給和問題回報同一個信箱，還沒跟資訊單位確認）。**測試帳號不放進交接包與信裡，另外交給資訊單位。**
 - **ZIP 太大**：超過 `config/params.json` 的 `handoff_max_attachment_mb`（現在是 10 MB，估的，實際上限要問資訊單位）時，不要當附件寄，改放資訊單位同意的共用資料夾，在信裡寫位置（草稿會自動改成這個寫法）。
-- **驗完之後**：拿到最終弱掃結果的位置，跟 AI 說「**記下弱掃結果在 <位置>**」，AI 會執行 `--platform-result`（要單獨用），累計總報告的「自架平台驗證」一行就從「未執行（選做）」改成「見最終弱掃結果 …」。
+- **驗完之後**：資訊單位驗完會給您最終弱掃結果的位置（報告檔的路徑、共用資料夾或網址都可以，500 字內、不含雙引號）。跟 AI 說「**記下弱掃結果在 <位置>**」，AI 會執行 `--platform-result`（要單獨用；記錯了重新給一個位置就會蓋過），累計總報告的「自架平台驗證」一行就從「未執行（選做）」改成「見最終弱掃結果 …」。
 
 ```bash
 node lazy-pack/code-and-ai-audit.mjs --handoff --target "<藏家系統原始碼路徑>"

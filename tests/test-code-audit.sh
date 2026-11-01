@@ -974,11 +974,11 @@ BASE="$(find "$HD" -mindepth 1 -maxdepth 1 -type d -name 'FAKE-SYS-*' | head -1)
 [ -n "$BASE" ] && [ -f "$Z" ] && [ -f "$DRF" ] && [ "$(hcount)" = 3 ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14b] 應有一個 FAKE-SYS-<時間> 資料夾、同名 ZIP 與信件草稿"; }
 # 信件草稿（D17 第 6 點）：沒設 LAZY_PACK_REPORT_TO → 收件人要自己填；ZIP 沒超過附件上限（正式參數檔）→ 當附件；檔名只寫名稱
 chk t14b "信件草稿（主旨與內文，不會自動寄出）"
-chk t14b "主旨：【Lazy Pack 交接包】假系統 甲（FAKE-SYS，-dev）"
+chk t14b "主旨：【Lazy Pack 交接包】假系統 甲（FAKE-SYS，dev）"
 nochk t14b "超過信件附件上限"
 fchk t14b-to "$DRF" "^收件人：（請填資訊相關權責單位的信箱"
 fchk t14b-same "$DRF" "沿用錯誤回報的環境變數 LAZY_PACK_REPORT_TO；交接包要不要寄給同一個信箱，還沒跟資訊相關權責單位確認"
-fchk t14b-sub "$DRF" "^主旨：【Lazy Pack 交接包】假系統 甲（FAKE-SYS，-dev）請協助用自架弱掃平台驗證"
+fchk t14b-sub "$DRF" "^主旨：【Lazy Pack 交接包】假系統 甲（FAKE-SYS，dev）請協助用自架弱掃平台驗證"
 fchk t14b-att "$DRF" "^附件：$(basename "$Z")（[0-9.]* MB，和這份草稿在同一個資料夾）$"
 fchk t14b-url "$DRF" "^- 受測網址：https://fake-site.example.invalid$"
 fchk t14b-cnt "$DRF" "^- Lazy Pack 檢測結果：共 2 筆（高 0、中 1、低 0、資訊 1）"
@@ -988,8 +988,13 @@ fnochk t14b-path "$DRF" "$(basename "$S")"   # 不寫完整路徑（裡面有電
 if command -v unzip >/dev/null 2>&1 && [ -f "$Z" ]; then
   B="$(basename "$BASE")"
   unzip -tq "$Z" > /dev/null && unzip -tq "$BASE/source.zip" > /dev/null && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14b] ZIP 驗證失敗（unzip -t）"; }
-  [ "$(unzip -Z1 "$Z" | sort | tr '\n' ' ')" = "$B/README.md $B/findings.json $B/full-execution-report.md $B/manifest.json $B/source.zip " ] \
+  [ "$(unzip -Z1 "$Z" | LC_ALL=C sort | tr '\n' ' ')" = "$B/README.md $B/findings.json $B/full-execution-report.md $B/manifest.json $B/source.zip " ] \
     && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14b] 外層 ZIP 的檔案清單不對：$(unzip -Z1 "$Z" | tr '\n' ' ')"; }
+  # README 內容表列的每個檔名，外層 ZIP 裡都要有
+  unzip -p "$Z" "$B/README.md" | grep -o '^| `[A-Za-z.-]*`' | tr -d '|` ' > "$S/readme-names.txt"
+  unzip -Z1 "$Z" | sed "s#^$B/##" > "$S/zip-names.txt"
+  [ "$(wc -l < "$S/readme-names.txt" | tr -d ' ')" = 4 ] && ! grep -vxFf "$S/zip-names.txt" "$S/readme-names.txt" | grep -q . \
+    && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14b] README 表列的檔名（$(tr '\n' ' ' < "$S/readme-names.txt")）跟外層 ZIP 對不上"; }
   unzip -Z1 "$BASE/source.zip" > "$S/src-list.txt"
   ! grep -qE '(^|/)(\.env|\.git/|node_modules/|\.next/)' "$S/src-list.txt" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14b] source.zip 不該有 .env*、.git、node_modules、.next：$(tr '\n' ' ' < "$S/src-list.txt")"; }
   # 正面：原有的檔、子資料夾、二進位檔都在，而且逐位元組相同
@@ -1027,7 +1032,7 @@ const r = fs.readFileSync(d + "/README.md", "utf8");
 const ok = m.schema_version === 1 && m.system_name === "假系統 甲" && m.system_code === "FAKE-SYS" && m.owner === "假負責人" && m.environment === "-dev"
   && m.target_url === "https://fake-site.example.invalid" && m.source_version.kind === "folder_mtime" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$/.test(m.generated_at)
   && m.lazy_pack.name === "art-collector-recommender Lazy Pack" && m.test_account === "由負責人另外提供"
-  && r.includes("# 假系統 甲 交接包（FAKE-SYS，-dev）") && r.includes("共 2 筆（高 0、中 1、低 0、資訊 1）") && r.includes("原始碼 " + process.argv[2] + " 個檔");
+  && r.includes("# 假系統 甲 交接包（FAKE-SYS，dev）") && r.includes("共 2 筆（高 0、中 1、低 0、資訊 1）") && r.includes("原始碼 " + process.argv[2] + " 個檔");
 process.exit(ok ? 0 : 1);' "$(mp "$BASE")" "$(( $(find "$FIX" -type f | wc -l) + 2 ))" \
   && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14b] manifest.json 或 README.md 的內容不對"; }
 grep -q '"WEB-KEEP"' "$FND" && grep -q '"IMG-VULN"' "$FND" && ! grep -q '"SRC-' "$FND" \
@@ -1119,6 +1124,7 @@ chk t14p "放到共用資料夾，在內文填上位置（不當附件）"
 D1="$(hdraft 1)"
 fchk t14p-att "$D1" "^附件：不附檔（LIM-1-.*\.zip 有 [0-9.]* MB，超過附件上限 1 MB"
 fchk t14p-body "$D1" "已放在共用資料夾：（請填共用資料夾的位置）"
+fnochk t14p-path "$D1" "$(basename "$S")"   # 超過上限的草稿也不寫完整路徑
 phm 2; runhc 2; rc_is t14q $? 0
 nochk t14q "超過信件附件上限"
 chk t14q "3. 附件：LIM-2-"
@@ -1126,6 +1132,59 @@ fchk t14q-att "$(hdraft 2)" "^附件：LIM-2-.*\.zip（[0-9.]* MB，和這份草
 phm 0; runhc 0; rc_is t14r $? 0
 chk t14r "handoff_max_attachment_mb=0 缺漏或超出範圍 (1~1000)，這次照預設值 10 跑"
 nochk t14r "超過信件附件上限"
+
+# 14s. 打包範圍（審閱 2026-11-01）：3-1 沒掃的副檔名（.yaml）裡的金鑰也要擋；.env* 裡的金鑰不進包就不擋；
+#      排除不分大小寫（.ENV、Node_Modules、.PEM），金鑰檔（.npmrc、.p12、ServiceAccount*.json）不進包
+KS="$S/pk"; cp -r "$FIX" "$KS"
+mkdir -p "$KS/config" "$KS/Node_Modules/x" "$KS/certs"
+printf 'api: %s\n' "$KEY" > "$KS/config/app.yaml"
+printf 'GEMINI=%s\n' "$KEY" > "$KS/.env.local"
+printf 'X=1\n' > "$KS/.ENV"; printf 'module.exports=1;\n' > "$KS/Node_Modules/x/i.js"; printf 'pem\n' > "$KS/certs/Server.PEM"
+printf 'p12\n' > "$KS/certs/id.p12"; printf '{}\n' > "$KS/ServiceAccount-prod.json"; printf 'token=1\n' > "$KS/.npmrc"; printf '{"keep":1}\n' > "$KS/config/keep.json"
+HS=(--system-name "打包範圍" --system-code PK-SYS --owner "假負責人" --env 正式)
+n0="$(hcount)"
+run --handoff --target "$(mp "$KS")" "${HS[@]}" < /dev/null; rc_is t14s $? 1
+chk t14s "這次不產生交接包：原始碼裡有 1 個檔疑似寫死了金鑰"
+chk t14s "config/app.yaml"
+chk t14s "另有 1 個檔疑似有金鑰，但不會進 source.zip"
+[ "$(hcount)" = "$n0" ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14s] 擋下時不該產生交接包"; }
+rm -f "$KS/config/app.yaml"
+run --handoff --target "$(mp "$KS")" "${HS[@]}" < /dev/null; rc_is t14t $? 0
+chk t14t "交接包已產生"
+chk t14t "另有 1 個檔疑似有金鑰，但不會進 source.zip"
+PKZ="$(find "$HD" -maxdepth 1 -type d -name 'PK-SYS-*' | head -1)/source.zip"
+if command -v unzip >/dev/null 2>&1 && [ -f "$PKZ" ]; then
+  unzip -Z1 "$PKZ" > "$S/pk-list.txt"
+  ! grep -qiE '(^|/)(\.env|node_modules|\.npmrc|[^/]*\.(pem|p12)|serviceaccount[^/]*)' "$S/pk-list.txt" && grep -qx 'config/keep.json' "$S/pk-list.txt" \
+    && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14t] source.zip 該排除的沒排除或把 config/keep.json 也排除了：$(tr '\n' ' ' < "$S/pk-list.txt")"; }
+else
+  skip=$((skip+1)); echo "SKIP [t14t] 沒有 unzip，無法核對 ZIP 內容"
+fi
+
+# 14u. 交接包資料夾放在原始碼底下：連跑兩次，第二次的 source.zip 不能含第一次的交接包
+IN="$S/inside"; cp -r "$FIX" "$IN"
+for i in 1 2; do LAZY_PACK_HANDOFF_DIR="$(mp "$IN")/out" run --handoff --target "$(mp "$IN")" --system-name "裡面" --system-code IN-SYS --owner "假負責人" --env 正式 < /dev/null; rc_is t14u-$i $? 0; done
+if command -v unzip >/dev/null 2>&1; then
+  ok=1; n=0
+  for z in "$IN"/out/IN-SYS-*/source.zip; do
+    n=$((n+1)); unzip -Z1 "$z" | grep -q '^out/' && ok=0
+  done
+  [ "$ok" = 1 ] && [ "$n" = 2 ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14u] 交接包資料夾在原始碼底下時，source.zip 不該含歷次交接包（找到 $n 個 source.zip）"; }
+else
+  skip=$((skip+1)); echo "SKIP [t14u] 沒有 unzip，無法核對 ZIP 內容"
+fi
+
+# 14v. 累計總報告放進交接包前先遮蔽電腦使用者名稱與信箱
+printf '路徑 %s 信箱 someone@example.invalid\n' "${USERPROFILE:-$HOME}" > "$FULL"
+run --handoff --target "$(mp "$C")" --system-name "遮蔽" --system-code RED-SYS --owner "假負責人" --env 正式 < /dev/null; rc_is t14v $? 0
+RZ="$(find "$HD" -maxdepth 1 -name 'RED-SYS-*.zip' | head -1)"
+if command -v unzip >/dev/null 2>&1 && [ -f "$RZ" ]; then
+  RB="$(basename "$RZ" .zip)"; unzip -p "$RZ" "$RB/full-execution-report.md" > "$S/red-report.txt"
+  grep -q '<HOME>' "$S/red-report.txt" && grep -q '<email>' "$S/red-report.txt" && ! grep -q 'someone@example' "$S/red-report.txt" \
+    && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14v] 交接包裡的累計總報告沒遮蔽家目錄或信箱：$(cat "$S/red-report.txt")"; }
+else
+  skip=$((skip+1)); echo "SKIP [t14v] 沒有 unzip 或找不到 ZIP"
+fi
 
 echo "PASS=$pass FAIL=$fail SKIP=$skip"
 [ "$fail" -eq 0 ] && [ "$skip" -eq 0 ]

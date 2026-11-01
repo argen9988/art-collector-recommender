@@ -179,6 +179,10 @@ function collectFiles(dir, fileList = []) {
   return fileList;
 }
 
+// 3-1 與 --handoff 打包前的檢查共用的金鑰判斷
+const SECRET_KEY_RE = /(?:AIza[0-9A-Za-z_-]{35}|re_[0-9A-Za-z_]{20,}|SG\.[0-9A-Za-z_-]{20,})/;
+const SECRET_DBURL_RE = /postgres(?:ql)?:\/\/[^/\s"']+:[^@\s"']+@[^/\s"']+/i;
+
 function scanCodebase(targetDir) {
   console.log('\n------------------------------------------------------------------------------');
   console.log(`🔍 [細項 3-1] 執行本機原始碼金鑰、資料庫與 EDM 憑證安全檢查 (目標: ${targetDir})`);
@@ -211,15 +215,13 @@ function scanCodebase(targetDir) {
   let nextPublicLeakCount = 0;
   let clientSdkLeakCount = 0;
 
-  const apiKeyRegex = /(?:AIza[0-9A-Za-z_-]{35}|re_[0-9A-Za-z_]{20,}|SG\.[0-9A-Za-z_-]{20,})/;
-  const dbUrlRegex = /postgres(?:ql)?:\/\/[^/\s"']+:[^@\s"']+@[^/\s"']+/i;
   const nextPublicSensitiveRegex = /NEXT_PUBLIC_[A-Z0-9_]*(?:KEY|SECRET|PASSWORD|TOKEN|DATABASE|SMTP|EDM)/;
 
   for (const file of files) {
     const content = fs.readFileSync(file, 'utf-8');
     const relPath = path.relative(targetDir, file);
 
-    if (apiKeyRegex.test(content) || dbUrlRegex.test(content)) {
+    if (SECRET_KEY_RE.test(content) || SECRET_DBURL_RE.test(content)) {
       hardcodedKeyCount++;
       findings.push({ rule: 'HARDCODED_SECRET', file: relPath, msg: '偵測到疑似硬編碼之 API Key (Google/Resend/SendGrid) 或含密碼之資料庫連線字串' });
     }
@@ -1086,7 +1088,12 @@ function recordPlatformResult(where) {
     return;
   }
   lines[i] = PLATFORM_LINE + platformResultLabel(state);
-  fs.writeFileSync(full, lines.join('\n'), 'utf-8');
+  try {
+    fs.writeFileSync(full, lines.join('\n'), 'utf-8');
+  } catch (err) {
+    console.log(`⚠️ 位置已記進狀態檔，但累計總報告寫不進去（${err.code || err.message}）；下次執行任一階段會補上。`);
+    process.exit(1);
+  }
   console.log(`✅ 累計總報告已更新：${full}`);
 }
 
@@ -1747,7 +1754,12 @@ function writeProblemReport(note) {
 const HANDOFF_SCHEMA_VERSION = 1; // 改交接包格式時加 1（規格第 4 節）
 const HANDOFF_DIR = process.env.LAZY_PACK_HANDOFF_DIR || path.join(REPORTS_DIR, 'handoff'); // 測試時指到暫存資料夾
 const LAZY_PACK_NAME = 'art-collector-recommender Lazy Pack';
-const ZIP_EXCLUDE = (name) => name.startsWith('.env') || ['.git', 'node_modules', '.next'].includes(name);
+// 比對不分大小寫（Windows、macOS 的檔案系統不分）；除了 .env*、.git、node_modules、.next，還排除常見放金鑰的檔案
+const ZIP_EXCLUDE = (name) => {
+  const n = name.toLowerCase();
+  return n.startsWith('.env') || ['.git', 'node_modules', '.next', '.npmrc', '.netrc', '.pypirc'].includes(n)
+    || /\.(pem|key|p12|pfx)$/.test(n) || /^(service[-_]?account|credentials?)[^/]*\.json$/.test(n);
+};
 // manifest 的欄位：參數 → 狀態檔記下的 → 在終端機問；問到的記進狀態檔，下次不再問（gcp-setup-and-check.sh 也要認得這些欄位）
 const HANDOFF_FIELDS = [
   { flag: '--system-name', key: 'SAVED_HANDOFF_SYSTEM_NAME', label: '系統名稱', example: '藏家推薦系統' },
@@ -1838,12 +1850,13 @@ function writeZip(zipPath, entries) {
   fs.writeFileSync(zipPath, Buffer.concat([...body, ...central, end]));
 }
 
-// 原始碼的檔案清單：排除 .env*、.git、node_modules、.next（資料夾與檔案都算）與捷徑（symlink）
+// 原始碼的檔案清單：排除 ZIP_EXCLUDE 的（資料夾與檔案都算）、捷徑（symlink）、交接包與報告資料夾
 function collectSourceEntries(dir, rel = '', out = { entries: [], excluded: [] }) {
   for (const ent of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) {
     const r = rel ? `${rel}/${ent.name}` : ent.name;
-    if (ZIP_EXCLUDE(ent.name) || ent.isSymbolicLink()) { out.excluded.push(r); continue; }
     const full = path.join(dir, r);
+    // 交接包與報告資料夾若在原始碼底下，不能把歷次的交接包又打進去
+    if (ZIP_EXCLUDE(ent.name) || ent.isSymbolicLink() || (ent.isDirectory() && [HANDOFF_DIR, REPORTS_DIR].some((d) => samePath(path.resolve(full), path.resolve(d))))) { out.excluded.push(r); continue; }
     if (ent.isDirectory()) collectSourceEntries(dir, r, out);
     else if (ent.isFile()) out.entries.push({ name: r, data: fs.readFileSync(full), mtime: fs.statSync(full).mtime });
   }
@@ -1872,10 +1885,22 @@ function lazyPackVersion() {
   return '未知（不是用 git 下載的）';
 }
 
+// manifest 的 environment 是 '-dev'（規格第 4 節）或 '正式'；給人看的地方寫 dev
+const envLabel = (m) => (m.environment === '-dev' ? 'dev' : m.environment);
+
+// 打包的檔案裡有沒有寫死的金鑰：只看文字檔（前 8 KB 沒有 NUL）、5 MB 以內；3-1 只掃部分副檔名，.yaml、.sql、.txt 等也要看
+function packagedSecretFiles(entries) {
+  return entries.filter((e) => {
+    if (e.data.length > 5 * 1024 * 1024 || e.data.subarray(0, 8192).includes(0)) return false;
+    const text = e.data.toString('utf-8');
+    return SECRET_KEY_RE.test(text) || SECRET_DBURL_RE.test(text);
+  }).map((e) => e.name);
+}
+
 function handoffReadme(m, counts, total, srcCount, hasReport) {
   const ver = m.source_version.kind === 'commit' ? `commit ${m.source_version.value}` : `${m.source_version.value}（原始碼資料夾的修改時間，通常是下載或解壓縮的時間）`;
   return [
-    `# ${m.system_name} 交接包（${m.system_code}，${m.environment}）`,
+    `# ${m.system_name} 交接包（${m.system_code}，${envLabel(m)}）`,
     '',
     `這份交接包由 ${m.lazy_pack.name}（版本 ${m.lazy_pack.version}）產生，給資訊相關權責單位用自架弱掃平台再驗證。`,
     '',
@@ -1892,7 +1917,7 @@ function handoffReadme(m, counts, total, srcCount, hasReport) {
     '| `manifest.json` | 上面這些系統資料（給程式讀） |',
     `| \`findings.json\` | Lazy Pack 的檢測結果共 ${total} 筆（高 ${counts['高']}、中 ${counts['中']}、低 ${counts['低']}、資訊 ${counts['資訊']}），欄位照弱掃規格第 8 節 |`,
     hasReport ? '| `full-execution-report.md` | Lazy Pack 的全部階段執行累計總報告 |' : '| （沒有 `full-execution-report.md`） | 這台電腦還沒產生過累計總報告（三個階段都還沒跑過） |',
-    `| \`source.zip\` | 原始碼 ${srcCount} 個檔（不含 \`.env*\`、\`.git\`、\`node_modules\`、\`.next\`） |`,
+    `| \`source.zip\` | 原始碼 ${srcCount} 個檔（不含 \`.env*\`、\`.git\`、\`node_modules\`、\`.next\`、金鑰檔與捷徑） |`,
     '',
     '## 打包前做了什麼',
     '',
@@ -1979,11 +2004,19 @@ async function runHandoff(cliArgs) {
     console.log('❌ findings.json 寫不進去，這次不打包。');
     process.exit(1);
   }
-  const secrets = scan.findings.filter((f) => f.rule === 'HARDCODED_SECRET');
+  const src = collectSourceEntries(t.dir);
+  const packed = new Set(src.entries.map((e) => e.name));
+  // 擋下的只算「會進 source.zip」的檔：3-1 掃到的（扣掉 .env* 等不進包的）加上打包前補掃的其他文字檔
+  const relOf = (f) => f.file.split(path.sep).join('/');
+  const secretSet = new Set(scan.findings.filter((f) => f.rule === 'HARDCODED_SECRET').map(relOf).filter((f) => packed.has(f)));
+  for (const f of packagedSecretFiles(src.entries)) secretSet.add(f);
+  const secrets = [...secretSet].map((file) => ({ file }));
+  const skippedSecrets = scan.findings.filter((f) => f.rule === 'HARDCODED_SECRET' && !packed.has(relOf(f)));
+  if (skippedSecrets.length) console.log(`ℹ️ 另有 ${skippedSecrets.length} 個檔疑似有金鑰，但不會進 source.zip（.env*、金鑰檔等），這次不擋；結果仍在 findings.json。`);
   if (secrets.length) {
     console.log('\n------------------------------------------------------------------------------');
     console.log(` ⛔ 這次不產生交接包：原始碼裡有 ${secrets.length} 個檔疑似寫死了金鑰或資料庫密碼（SRC-SECRET）`);
-    for (const s of secrets) console.log(`   • ${s.file.split(path.sep).join('/')}`);
+    for (const s of secrets) console.log(`   • ${s.file}`);
     console.log(' 👉 請系統負責人把金鑰移到 Secret Manager 或環境變數、從程式碼刪掉（已外流的金鑰要作廢重發），再重跑 --handoff。');
     console.log('    交接包會把原始碼交給弱掃平台，帶著金鑰送出等於把金鑰交出去。');
     console.log('------------------------------------------------------------------------------');
@@ -2000,13 +2033,14 @@ async function runHandoff(cliArgs) {
   let manifest, counts, total;
   try {
     fs.mkdirSync(outDir, { recursive: true });
-    const src = collectSourceEntries(t.dir);
     writeZip(path.join(outDir, 'source.zip'), src.entries);
     const findings = JSON.parse(fs.readFileSync(FINDINGS_FILE, 'utf-8'));
+    if (!Array.isArray(findings)) throw new Error('findings.json 的格式不對（不是清單）');
     fs.copyFileSync(FINDINGS_FILE, path.join(outDir, 'findings.json'));
     const full = path.join(REPORTS_DIR, 'full-execution-report.md');
     const hasReport = fs.existsSync(full);
-    if (hasReport) fs.copyFileSync(full, path.join(outDir, 'full-execution-report.md'));
+    // 累計總報告可能有電腦使用者名稱、信箱，放進交接包前先遮蔽
+    if (hasReport) fs.writeFileSync(path.join(outDir, 'full-execution-report.md'), redactSecrets(fs.readFileSync(full, 'utf-8')), 'utf-8');
     manifest = {
       schema_version: HANDOFF_SCHEMA_VERSION,
       system_name: values.SAVED_HANDOFF_SYSTEM_NAME,
@@ -2036,7 +2070,9 @@ async function runHandoff(cliArgs) {
     if (!hasReport) console.log(' ⚠️ 這台電腦還沒有累計總報告（三個階段都還沒跑過），交接包裡沒有 full-execution-report.md');
     if (!manifest.target_url) console.log(' ⚠️ 沒有記下網站網址（先跑第一階段會記下），交接包的受測網址是空的');
   } catch (err) {
-    console.log(`❌ 打包失敗：${err.message}（${outDir}）`);
+    // 不留半成品：資料夾與 ZIP 都清掉，免得下次以為有一份完整的
+    for (const p of [outDir, zipPath]) { try { fs.rmSync(p, { recursive: true, force: true }); } catch { /* 清不掉就算了 */ } }
+    console.log(`❌ 打包失敗：${err.message}（半成品已清掉）`);
     process.exit(1);
   }
 
@@ -2076,7 +2112,7 @@ const mbText = (bytes) => (bytes / 1024 / 1024).toFixed(2);
 function handoffEmailDraft(m, counts, total, zipName, zipBytes, maxMb, over) {
   const to = process.env.LAZY_PACK_REPORT_TO || '（請填資訊相關權責單位的信箱；設環境變數 LAZY_PACK_REPORT_TO 就會自動帶入）';
   const { human } = nowStamp();
-  const subject = `【Lazy Pack 交接包】${m.system_name}（${m.system_code}，${m.environment}）請協助用自架弱掃平台驗證（${human}）`;
+  const subject = `【Lazy Pack 交接包】${m.system_name}（${m.system_code}，${envLabel(m)}）請協助用自架弱掃平台驗證（${human}）`;
   const body = [
     '您好，',
     '',
@@ -2084,7 +2120,7 @@ function handoffEmailDraft(m, counts, total, zipName, zipBytes, maxMb, over) {
       ? `「${m.system_name}」的交接包（${zipName}，${mbText(zipBytes)} MB）超過信件附件上限，已放在共用資料夾：（請填共用資料夾的位置），請協助用自架弱掃平台再驗證。`
       : `附上「${m.system_name}」的交接包（${zipName}），請協助用自架弱掃平台再驗證。`,
     '',
-    `- 系統代號：${m.system_code}（${m.environment}）`,
+    `- 系統代號：${m.system_code}（${envLabel(m)}）`,
     `- 受測網址：${m.target_url || '（沒有記下網址，請向系統負責人確認）'}`,
     `- 系統負責人：${m.owner}`,
     `- Lazy Pack 檢測結果：共 ${total} 筆（高 ${counts['高']}、中 ${counts['中']}、低 ${counts['低']}、資訊 ${counts['資訊']}），在交接包的 findings.json`,

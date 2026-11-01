@@ -307,6 +307,16 @@ printf 'SAVED_PROJECT_ID="proj-a"\n' > "$ST16"
 run16; rc_is t16g $? 0
 grep -qx -- "- \*\*自架平台驗證\*\*：未執行（選做）" "$R16/reports/full-execution-report.md" \
   && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t16g] 沒記過時累計總報告要寫「未執行（選做）」"; }
+# 沒有交接包欄位的舊狀態檔：寫回空值，不能變成亂碼或把別的欄位吃掉
+for k in SYSTEM_NAME SYSTEM_CODE OWNER ENV; do
+  grep -qx "SAVED_HANDOFF_$k=\"\"" "$ST16" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t16g] 舊狀態檔缺 SAVED_HANDOFF_$k 時要寫回空值"; }
+done
+grep -qx 'SAVED_PROJECT_ID="proj-a"' "$ST16" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t16g] 寫回後 SAVED_PROJECT_ID 不見了"; }
+# 16h. 欄位值含等號、單引號、百分比、星號、井號（mjs 只擋雙引號、反斜線、$、反引號）：逐字寫回
+printf 'SAVED_HANDOFF_SYSTEM_NAME="a=b '"'"'x'"'"' 100%%* #1"\nSAVED_HANDOFF_OWNER="王=小明"\n' > "$ST16"
+run16; rc_is t16h $? 0
+grep -qxF -- "SAVED_HANDOFF_SYSTEM_NAME=\"a=b 'x' 100%* #1\"" "$ST16" && grep -qxF 'SAVED_HANDOFF_OWNER="王=小明"' "$ST16" \
+  && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t16h] 含 = ' % * # 的欄位值沒逐字寫回：$(grep SAVED_HANDOFF "$ST16" | tr '\n' ' ')"; }
 
 # 17. 錯誤回報（D8、D15）：全程記錄到 LAZY_PACK_LOGS_DIR、遮蔽規則、--report-problem 轉給 code-and-ai-audit.mjs；紀錄與回報檔都要遮掉金鑰、密碼、電子郵件與家目錄
 logs_n() { find "$S/logs" -maxdepth 1 -name 'gcp-setup-and-check-*.log' 2>/dev/null | wc -l | tr -d ' '; }
