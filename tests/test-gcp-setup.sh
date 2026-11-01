@@ -294,7 +294,12 @@ chk t16e "預估月費：約 NT\$325000 / 月"   # 10×1000×32.5
 # 16f. 自架平台驗證（D17）：mjs --platform-result 記下的位置照原樣寫回狀態檔，累計總報告寫「見最終弱掃結果」；沒記過寫「未執行（選做）」
 p16 0.26 20 32.5
 printf 'SAVED_PROJECT_ID="proj-a"\nSAVED_PLATFORM_RESULT="D:/弱掃/FAKE系統/03_最終弱掃結果"\n' > "$ST16"
+# 交接包 manifest 的欄位（mjs --handoff 記下的）也要照原樣寫回
+printf 'SAVED_HANDOFF_SYSTEM_NAME="假系統 甲"\nSAVED_HANDOFF_SYSTEM_CODE="FAKE-SYS"\nSAVED_HANDOFF_OWNER="假負責人"\nSAVED_HANDOFF_ENV="-dev"\n' >> "$ST16"
 run16; rc_is t16f $? 0
+for kv in 'SAVED_HANDOFF_SYSTEM_NAME="假系統 甲"' 'SAVED_HANDOFF_SYSTEM_CODE="FAKE-SYS"' 'SAVED_HANDOFF_OWNER="假負責人"' 'SAVED_HANDOFF_ENV="-dev"'; do
+  grep -qx -- "$kv" "$ST16" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t16f] 狀態檔沒留下 $kv"; }
+done
 grep -qx 'SAVED_PLATFORM_RESULT="D:/弱掃/FAKE系統/03_最終弱掃結果"' "$ST16" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t16f] 狀態檔沒留下 SAVED_PLATFORM_RESULT"; }
 grep -qx -- "- \*\*自架平台驗證\*\*：見最終弱掃結果 D:/弱掃/FAKE系統/03_最終弱掃結果" "$R16/reports/full-execution-report.md" \
   && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t16f] 累計總報告沒有自架平台驗證的位置"; }

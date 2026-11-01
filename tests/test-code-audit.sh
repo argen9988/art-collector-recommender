@@ -940,5 +940,148 @@ chk t13j "不能有雙引號、換行"
 cmp -s "$ST" "$S/st.old" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t13h-j] 防呆擋下時不該改狀態檔"; }
 rm -f "$ST"
 
+# 14. 交接包 --handoff（D17）：先重跑 3-1，SRC-SECRET 整包不出；產出資料夾與同名 ZIP（manifest、findings、累計總報告、source.zip、README）；
+#     source.zip 排除 .env*、.git、node_modules、.next；manifest 的欄位：參數 → 狀態檔 → 問，問到的記進狀態檔
+HD="$S/handoff"; export LAZY_PACK_HANDOFF_DIR="$(mp "$S")/handoff"
+mkdir -p "$HD"
+hcount() { find "$HD" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' '; }
+HF=(--system-name "假系統 甲" --system-code FAKE-SYS --owner "假負責人" --env dev)
+# 14a. 埋了金鑰的專案：不打包、結束碼 1；findings.json 照樣換成這次的結果；欄位先記進狀態檔（下次不用再問）
+rm -f "$ST" "$FND"
+printf 'SAVED_CLOUD_RUN_URL="https://fake-site.example.invalid"\nSAVED_PLATFORM_RESULT="D:/弱掃/保留"\n' > "$ST"
+run --handoff --target "$(mp "$S/leaky")" "${HF[@]}" < /dev/null; rc_is t14a $? 1
+chk t14a "這次不產生交接包：原始碼裡有 1 個檔疑似寫死了金鑰"
+chk t14a "lib/gemini.ts"
+nochk t14a "交接包已產生"
+[ "$(hcount)" = 0 ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14a] 掃到金鑰不該產生任何交接包"; }
+grep -q '"SRC-SECRET"' "$FND" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14a] findings.json 沒有這次的 SRC-SECRET"; }
+grep -qx 'SAVED_HANDOFF_SYSTEM_CODE="FAKE-SYS"' "$ST" && grep -qx 'SAVED_PLATFORM_RESULT="D:/弱掃/保留"' "$ST" \
+  && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14a] 欄位沒記進狀態檔或原有欄位不見了"; }
+
+# 14b. 乾淨的專案＋要排除的東西：產生資料夾與 ZIP，內容逐項核對
+C="$S/clean"; cp -r "$FIX" "$C"
+mkdir -p "$C/.git" "$C/node_modules/x" "$C/.next" "$C/sub/deep" "$C/.env.d"
+printf 'SECRET_IN_DOTENV=1\n' > "$C/.env"; printf 'X=1\n' > "$C/.env.local"; printf 'X=2\n' > "$C/sub/.env.production"; printf 'X=3\n' > "$C/.env.d/a.ts"
+printf 'ref: refs/heads/main\n' > "$C/.git/HEAD"; printf 'module.exports=1;\n' > "$C/node_modules/x/index.js"; printf 'built\n' > "$C/.next/out.js"
+printf 'export const deep = "深層";\n' > "$C/sub/deep/中文檔名.ts"
+head -c 3000 /dev/urandom > "$C/sub/blob.bin"
+printf '[{"category":"WEB-KEEP","severity":"中","id":"KEEP"},{"category":"IMG-VULN","severity":"資訊","id":"IMG"}]\n' > "$FND"
+printf '# FAKE-FULL-REPORT\n' > "$FULL"
+run --handoff --target "$(mp "$C")" "${HF[@]}" < /dev/null; rc_is t14b $? 0
+chk t14b "交接包已產生"
+chk t14b "排除了 7 個"
+BASE="$(find "$HD" -mindepth 1 -maxdepth 1 -type d -name 'FAKE-SYS-*' | head -1)"; Z="$BASE.zip"
+[ -n "$BASE" ] && [ -f "$Z" ] && [ "$(hcount)" = 2 ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14b] 應有一個 FAKE-SYS-<時間> 資料夾與同名 ZIP"; }
+if command -v unzip >/dev/null 2>&1 && [ -f "$Z" ]; then
+  B="$(basename "$BASE")"
+  unzip -tq "$Z" > /dev/null && unzip -tq "$BASE/source.zip" > /dev/null && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14b] ZIP 驗證失敗（unzip -t）"; }
+  [ "$(unzip -Z1 "$Z" | sort | tr '\n' ' ')" = "$B/README.md $B/findings.json $B/full-execution-report.md $B/manifest.json $B/source.zip " ] \
+    && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14b] 外層 ZIP 的檔案清單不對：$(unzip -Z1 "$Z" | tr '\n' ' ')"; }
+  unzip -Z1 "$BASE/source.zip" > "$S/src-list.txt"
+  ! grep -qE '(^|/)(\.env|\.git/|node_modules/|\.next/)' "$S/src-list.txt" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14b] source.zip 不該有 .env*、.git、node_modules、.next：$(tr '\n' ' ' < "$S/src-list.txt")"; }
+  # 正面：原有的檔、子資料夾、二進位檔都在，而且逐位元組相同
+  ok=1
+  for f in package.json app/page.tsx sub/blob.bin .gitignore; do
+    grep -qx "$f" "$S/src-list.txt" && unzip -p "$BASE/source.zip" "$f" | cmp -s - "$C/$f" || { ok=0; echo "  （$f 不在或內容不同）"; }
+  done
+  [ "$ok" = 1 ] && [ "$(wc -l < "$S/src-list.txt" | tr -d ' ')" = "$(( $(find "$FIX" -type f | wc -l) + 2 ))" ] \
+    && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14b] source.zip 的檔案或內容不對"; }
+  unzip -p "$Z" "$B/full-execution-report.md" | grep -q 'FAKE-FULL-REPORT' && unzip -p "$Z" "$B/findings.json" | cmp -s - "$FND" \
+    && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14b] ZIP 裡的累計總報告或 findings.json 不是現在的那份"; }
+else
+  skip=$((skip+1)); echo "SKIP [t14b] 沒有 unzip，無法核對 ZIP 內容"
+fi
+# 中文檔名用 node 讀中央目錄核對（不靠 unzip 的語系設定），順便確認有標 UTF-8 旗標
+node -e '
+const b = require("fs").readFileSync(process.argv[1]);
+const names = []; let ok = true;
+for (let i = b.length - 22; i >= 0; i--) if (b.readUInt32LE(i) === 0x06054b50) {
+  let p = b.readUInt32LE(i + 16);
+  for (let n = b.readUInt16LE(i + 10); n > 0; n--) {
+    if (b.readUInt32LE(p) !== 0x02014b50) { ok = false; break; }
+    if (!(b.readUInt16LE(p + 8) & 0x0800)) ok = false;
+    const len = b.readUInt16LE(p + 28);
+    names.push(b.toString("utf8", p + 46, p + 46 + len)); p += 46 + len + b.readUInt16LE(p + 30) + b.readUInt16LE(p + 32);
+  }
+  break;
+}
+process.exit(ok && names.includes("sub/deep/中文檔名.ts") ? 0 : 1);' "$(mp "$BASE")/source.zip" \
+  && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14b] source.zip 的中文檔名不對或沒標 UTF-8"; }
+node -e '
+const fs = require("fs"); const d = process.argv[1];
+const m = JSON.parse(fs.readFileSync(d + "/manifest.json", "utf8"));
+const r = fs.readFileSync(d + "/README.md", "utf8");
+const ok = m.schema_version === 1 && m.system_name === "假系統 甲" && m.system_code === "FAKE-SYS" && m.owner === "假負責人" && m.environment === "-dev"
+  && m.target_url === "https://fake-site.example.invalid" && m.source_version.kind === "folder_mtime" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$/.test(m.generated_at)
+  && m.lazy_pack.name === "art-collector-recommender Lazy Pack" && m.test_account === "由負責人另外提供"
+  && r.includes("# 假系統 甲 交接包（FAKE-SYS，-dev）") && r.includes("共 2 筆（高 0、中 1、低 0、資訊 1）") && r.includes("原始碼 " + process.argv[2] + " 個檔");
+process.exit(ok ? 0 : 1);' "$(mp "$BASE")" "$(( $(find "$FIX" -type f | wc -l) + 2 ))" \
+  && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14b] manifest.json 或 README.md 的內容不對"; }
+grep -q '"WEB-KEEP"' "$FND" && grep -q '"IMG-VULN"' "$FND" && ! grep -q '"SRC-' "$FND" \
+  && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14b] 重跑 3-1 後 findings.json 應只換掉 SRC-（乾淨的專案沒有 SRC-）"; }
+
+# 14c. 不帶參數：沿用狀態檔的欄位與上次的原始碼（問一句，Enter = 是）；原始碼本身是 git repo → 記 commit
+G="$S/gitsrc"; cp -r "$FIX" "$G"
+git -C "$G" init -q && git -C "$G" -c user.name=t -c user.email=t@example.invalid add -A && git -C "$G" -c user.name=t -c user.email=t@example.invalid commit -qm init
+HEADSHA="$(git -C "$G" rev-parse HEAD)"
+printf 'SAVED_SOURCE_DIR="%s"\n' "$(mp "$G")" >> "$ST"
+rm -f "$FULL"
+printf '\n' | run --handoff; rc_is t14c $? 0
+chk t14c "要打包上次第三階段掃描的原始碼"
+chk t14c "：FAKE-SYS（上次記下的"
+chk t14c "還沒有累計總報告"
+nochk t14c "請輸入"
+BASE2="$(find "$HD" -mindepth 1 -maxdepth 1 -type d -name 'FAKE-SYS-*' -newer "$S/run.marker" | head -1)"
+[ -n "$BASE2" ] && [ ! -f "$BASE2/full-execution-report.md" ] && grep -q "\"value\": \"$HEADSHA\"" "$BASE2/manifest.json" && grep -q '"kind": "commit"' "$BASE2/manifest.json" \
+  && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14c] manifest 應記 commit $HEADSHA、沒有累計總報告時不放那個檔"; }
+# 14d. 回答 n：不打包、結束碼 2
+n0="$(hcount)"
+printf 'n\n' | run --handoff; rc_is t14d $? 2
+chk t14d "這次不打包"
+[ "$(hcount)" = "$n0" ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14d] 回答 n 不該產生交接包"; }
+
+# 14e. 狀態檔沒有欄位：在終端機問（管線每題一行）；沒回答 → 結束碼 2，有回答 → 記進狀態檔，環境 prod 記成「正式」
+rm -f "$ST"
+run --handoff --target "$(mp "$FIX")" < /dev/null; rc_is t14e $? 2
+chk t14e "缺少或看不懂：系統名稱、系統代號（英數字、- 與 _，用在資料夾名稱）、系統負責人、環境（正式或 dev）"
+chk t14e '--handoff --system-name "藏家推薦系統"'
+[ "$(hcount)" = "$n0" ] && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14e] 缺欄位不該產生交接包"; }
+printf '問到的系統\nASK-9\n問到的負責人\nprod\n' | run --handoff --target "$(mp "$FIX")"; rc_is t14f $? 0
+chk t14f "請輸入系統名稱"
+for kv in 'SAVED_HANDOFF_SYSTEM_NAME="問到的系統"' 'SAVED_HANDOFF_SYSTEM_CODE="ASK-9"' 'SAVED_HANDOFF_OWNER="問到的負責人"' 'SAVED_HANDOFF_ENV="正式"'; do
+  grep -qx -- "$kv" "$ST" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14f] 狀態檔沒記下 $kv"; }
+done
+BASE3="$(find "$HD" -mindepth 1 -maxdepth 1 -type d -name 'ASK-9-*' | head -1)"
+[ -n "$BASE3" ] && grep -q '"environment": "正式"' "$BASE3/manifest.json" && grep -q '"target_url": ""' "$BASE3/manifest.json" \
+  && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14f] 問到的欄位沒進 manifest（環境應為「正式」、沒網址時受測網址空白）"; }
+chk t14f "沒有記下網站網址"
+# 參數蓋過狀態檔，也更新狀態檔
+run --handoff --target "$(mp "$FIX")" --owner "新負責人" < /dev/null; rc_is t14g $? 0
+grep -qx 'SAVED_HANDOFF_OWNER="新負責人"' "$ST" && grep -qx 'SAVED_HANDOFF_SYSTEM_CODE="ASK-9"' "$ST" \
+  && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14g] --owner 應蓋過狀態檔、其他欄位照留"; }
+
+# 14h. 防呆：沒有原始碼、值不合格、搭配別的選項、欄位參數沒有 --handoff、缺值、指到 Lazy Pack 自己 → 結束碼 2，不產生交接包
+cp "$ST" "$S/st14.old"; n0="$(hcount)"
+grep -v '^SAVED_SOURCE_DIR=' "$S/st14.old" > "$ST"
+run --handoff < /dev/null; rc_is t14h $? 2
+chk t14h "還不知道原始碼在哪裡"
+cp "$S/st14.old" "$ST"
+run --handoff --target "$(mp "$FIX")" --system-code "a b" < /dev/null; rc_is t14i $? 2
+chk t14i "--system-code 的值不合格"
+run --handoff --target "$(mp "$FIX")" --env staging < /dev/null; rc_is t14j $? 2
+chk t14j "--env 的值不合格"
+run --handoff --target "$(mp "$FIX")" --owner 'a"b' < /dev/null; rc_is t14k $? 2
+chk t14k "--owner 的值不合格"
+run --handoff --scan-only < /dev/null; rc_is t14l $? 2
+chk t14l "--handoff 只能搭配"
+run --target "$(mp "$FIX")" --owner "某人" < /dev/null; rc_is t14m $? 2
+chk t14m "--owner 要搭配 --handoff 才有作用"
+run --handoff --owner < /dev/null; rc_is t14n $? 2
+chk t14n '--owner 後面要接值（例如 --owner "王小明"）'
+run --handoff --target "$(mp "$R")" < /dev/null; rc_is t14o $? 2
+chk t14o "這是 Lazy Pack 工具包自己"
+[ "$(hcount)" = "$n0" ] && cmp -s "$ST" "$S/st14.old" && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t14h-o] 防呆擋下時不該產生交接包或改狀態檔"; }
+rm -f "$ST"
+
 echo "PASS=$pass FAIL=$fail SKIP=$skip"
 [ "$fail" -eq 0 ] && [ "$skip" -eq 0 ]

@@ -24,6 +24,13 @@
  *
  *   node lazy-pack/code-and-ai-audit.mjs --report-problem [--note "<出了什麼狀況>"]                        # 出問題時：產生問題回報檔與信件草稿（不寄出）
  *   node lazy-pack/code-and-ai-audit.mjs --platform-result "<最終弱掃結果的位置>"                          # 弱掃 Skill 做完後：記進累計總報告的「自架平台驗證」一行
+ *   node lazy-pack/code-and-ai-audit.mjs --handoff [--target "<原始碼>"] [--system-name …] [--system-code …] [--owner …] [--env 正式|dev]  # 產生交接包
+ *
+ * 交接包（--handoff，D9、D17）：先對原始碼重跑 3-1（沒帶 --target 時問要不要沿用上次第三階段的），掃到寫死的金鑰（SRC-SECRET）整包不出、結束碼 1；
+ *   產出 reports/handoff/<系統代號>-<時間>/（manifest.json、findings.json、full-execution-report.md、source.zip、README.md）與同名 ZIP，
+ *   格式照 vulnerability-scan-summary 規格第 4 節；source.zip 一律排除 .env*、.git、node_modules、.next 與捷徑；ZIP 用 node 內建的 zlib 產生。
+ *   系統名稱、系統代號、負責人、環境：參數 → 狀態檔記下的（SAVED_HANDOFF_*）→ 在終端機依序問（管線時每題一行，順序是原始碼確認（沒帶 --target 時）、名稱、代號、負責人、環境），
+ *   問到的記進狀態檔；缺了就結束碼 2。測試時用 LAZY_PACK_HANDOFF_DIR 把交接包指到暫存資料夾
  *
  * 3-1 的結果也寫進 reports/findings.json（D17，類別代號 SRC-*，target 是原始碼裡的相對路徑；--self-test 不寫），只換掉舊的 SRC- 部分
  *
@@ -69,6 +76,7 @@ import path from 'node:path';
 import readline from 'node:readline/promises';
 import net from 'node:net';
 import tls from 'node:tls';
+import zlib from 'node:zlib';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -1729,6 +1737,305 @@ function writeProblemReport(note) {
 }
 
 // -----------------------------------------------------------------------------
+// 交接包 --handoff（D9、D17）：給資訊權責單位用自架弱掃平台再驗證；格式照 vulnerability-scan-summary 規格第 4 節
+// 先對要打包的原始碼重跑 3-1，掃到寫死的金鑰（SRC-SECRET）整包不出；ZIP 用 node 內建的 zlib 自己產生，不叫作業系統的壓縮指令
+// -----------------------------------------------------------------------------
+const HANDOFF_SCHEMA_VERSION = 1; // 改交接包格式時加 1（規格第 4 節）
+const HANDOFF_DIR = process.env.LAZY_PACK_HANDOFF_DIR || path.join(REPORTS_DIR, 'handoff'); // 測試時指到暫存資料夾
+const LAZY_PACK_NAME = 'art-collector-recommender Lazy Pack';
+const ZIP_EXCLUDE = (name) => name.startsWith('.env') || ['.git', 'node_modules', '.next'].includes(name);
+// manifest 的欄位：參數 → 狀態檔記下的 → 在終端機問；問到的記進狀態檔，下次不再問（gcp-setup-and-check.sh 也要認得這些欄位）
+const HANDOFF_FIELDS = [
+  { flag: '--system-name', key: 'SAVED_HANDOFF_SYSTEM_NAME', label: '系統名稱', example: '藏家推薦系統' },
+  { flag: '--system-code', key: 'SAVED_HANDOFF_SYSTEM_CODE', label: '系統代號（英數字、- 與 _，用在資料夾名稱）', example: 'ART-REC' },
+  { flag: '--owner', key: 'SAVED_HANDOFF_OWNER', label: '系統負責人', example: '王小明' },
+  { flag: '--env', key: 'SAVED_HANDOFF_ENV', label: '環境（正式或 dev）', example: '正式' },
+];
+
+// 回傳正規化後的值，不合格回 null
+function normalizeHandoffField(key, raw) {
+  const v = String(raw ?? '').trim();
+  if (!v || v.length > 100 || /["`$\\\r\n]/.test(v)) return null;
+  if (key === 'SAVED_HANDOFF_SYSTEM_CODE') return /^[A-Za-z0-9_-]{1,40}$/.test(v) ? v : null;
+  if (key === 'SAVED_HANDOFF_ENV') {
+    if (/^(正式|prod|production)$/i.test(v)) return '正式';
+    if (/^(-?dev|測試|開發)$/i.test(v)) return '-dev';
+    return null;
+  }
+  return v;
+}
+
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+function crc32(buf) {
+  let c = 0xffffffff;
+  for (const b of buf) c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+function dosDateTime(d) {
+  const y = Math.max(1980, d.getFullYear());
+  return [(d.getHours() << 11) | (d.getMinutes() << 5) | Math.floor(d.getSeconds() / 2), ((y - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate()];
+}
+
+// entries：[{ name: 'a/b.txt'（UTF-8）, data: Buffer, mtime: Date }]；不支援 ZIP64（超過 4 GB 或 65,534 個檔時丟錯誤）
+function writeZip(zipPath, entries) {
+  const LIMIT = 0xfffffffe;
+  if (entries.length > 0xfffe) throw new Error(`檔案有 ${entries.length} 個，超過 ZIP 的 65,534 個上限`);
+  const body = [];
+  const central = [];
+  let offset = 0;
+  for (const e of entries) {
+    const name = Buffer.from(e.name, 'utf-8');
+    const crc = crc32(e.data);
+    let data = zlib.deflateRawSync(e.data);
+    let method = 8;
+    if (data.length >= e.data.length) { data = e.data; method = 0; } // 壓不小的（例如圖片、ZIP）直接存
+    if (e.data.length > LIMIT || offset + 30 + name.length + data.length > LIMIT) throw new Error('內容超過 ZIP 的 4 GB 上限');
+    const [time, date] = dosDateTime(e.mtime);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0x0800, 6); // 檔名是 UTF-8
+    local.writeUInt16LE(method, 8);
+    local.writeUInt16LE(time, 10);
+    local.writeUInt16LE(date, 12);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(e.data.length, 22);
+    local.writeUInt16LE(name.length, 26);
+    const cen = Buffer.alloc(46);
+    cen.writeUInt32LE(0x02014b50, 0);
+    cen.writeUInt16LE(20, 4);
+    cen.writeUInt16LE(20, 6);
+    cen.writeUInt16LE(0x0800, 8);
+    cen.writeUInt16LE(method, 10);
+    cen.writeUInt16LE(time, 12);
+    cen.writeUInt16LE(date, 14);
+    cen.writeUInt32LE(crc, 16);
+    cen.writeUInt32LE(data.length, 20);
+    cen.writeUInt32LE(e.data.length, 24);
+    cen.writeUInt16LE(name.length, 28);
+    cen.writeUInt32LE(offset, 42);
+    body.push(local, name, data);
+    central.push(cen, name);
+    offset += 30 + name.length + data.length;
+  }
+  const cdSize = central.reduce((n, b) => n + b.length, 0);
+  if (offset + cdSize > LIMIT) throw new Error('內容超過 ZIP 的 4 GB 上限');
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(entries.length, 8);
+  end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(cdSize, 12);
+  end.writeUInt32LE(offset, 16);
+  fs.writeFileSync(zipPath, Buffer.concat([...body, ...central, end]));
+}
+
+// 原始碼的檔案清單：排除 .env*、.git、node_modules、.next（資料夾與檔案都算）與捷徑（symlink）
+function collectSourceEntries(dir, rel = '', out = { entries: [], excluded: [] }) {
+  for (const ent of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) {
+    const r = rel ? `${rel}/${ent.name}` : ent.name;
+    if (ZIP_EXCLUDE(ent.name) || ent.isSymbolicLink()) { out.excluded.push(r); continue; }
+    const full = path.join(dir, r);
+    if (ent.isDirectory()) collectSourceEntries(dir, r, out);
+    else if (ent.isFile()) out.entries.push({ name: r, data: fs.readFileSync(full), mtime: fs.statSync(full).mtime });
+  }
+  return out;
+}
+
+function isoLocal(d) {
+  const pad = (n) => String(Math.floor(Math.abs(n))).padStart(2, '0');
+  const off = -d.getTimezoneOffset();
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}${off >= 0 ? '+' : '-'}${pad(off / 60)}:${pad(off % 60)}`;
+}
+
+// 原始碼資料夾本身是 git repo（.git 就在這一層）才讀 commit；不然用資料夾的修改時間（下載或解壓縮的時間）
+function sourceVersion(dir) {
+  if (fs.existsSync(path.join(dir, '.git'))) {
+    const r = runCmd('git', ['-C', dir, 'rev-parse', 'HEAD']);
+    if (r.ok && /^[0-9a-f]{40}$/.test(r.stdout)) return { kind: 'commit', value: r.stdout };
+  }
+  return { kind: 'folder_mtime', value: isoLocal(fs.statSync(dir).mtime) };
+}
+function lazyPackVersion() {
+  if (fs.existsSync(path.join(REPO_ROOT, '.git'))) {
+    const r = runCmd('git', ['-C', REPO_ROOT, 'rev-parse', '--short', 'HEAD']);
+    if (r.ok && /^[0-9a-f]{4,40}$/.test(r.stdout)) return r.stdout;
+  }
+  return '未知（不是用 git 下載的）';
+}
+
+function handoffReadme(m, counts, total, srcCount, hasReport) {
+  const ver = m.source_version.kind === 'commit' ? `commit ${m.source_version.value}` : `${m.source_version.value}（原始碼資料夾的修改時間，通常是下載或解壓縮的時間）`;
+  return [
+    `# ${m.system_name} 交接包（${m.system_code}，${m.environment}）`,
+    '',
+    `這份交接包由 ${m.lazy_pack.name}（版本 ${m.lazy_pack.version}）產生，給資訊相關權責單位用自架弱掃平台再驗證。`,
+    '',
+    `- 產出時間：${m.generated_at}`,
+    `- 系統負責人：${m.owner}`,
+    `- 受測網址：${m.target_url || '（沒有記下網址，請向系統負責人確認）'}`,
+    `- 原始碼版本：${ver}`,
+    `- 測試帳號：${m.test_account}`,
+    '',
+    '## 內容',
+    '',
+    '| 檔案 | 內容 |',
+    '|---|---|',
+    '| `manifest.json` | 上面這些系統資料（給程式讀） |',
+    `| \`findings.json\` | Lazy Pack 的檢測結果共 ${total} 筆（高 ${counts['高']}、中 ${counts['中']}、低 ${counts['低']}、資訊 ${counts['資訊']}），欄位照弱掃規格第 8 節 |`,
+    hasReport ? '| `full-execution-report.md` | Lazy Pack 的全部階段執行累計總報告 |' : '| （沒有 `full-execution-report.md`） | 這台電腦還沒產生過累計總報告（三個階段都還沒跑過） |',
+    `| \`source.zip\` | 原始碼 ${srcCount} 個檔（不含 \`.env*\`、\`.git\`、\`node_modules\`、\`.next\`） |`,
+    '',
+    '## 打包前做了什麼',
+    '',
+    '- 重跑一次原始碼金鑰掃描（細項 3-1），沒有掃到寫死的金鑰（掃到時不會產生交接包）；這次的結果已寫進 `findings.json`。',
+    '- 交接包不放任何密碼與金鑰；需要登入的測試帳號請向系統負責人另外索取。',
+    '',
+  ].join('\n');
+}
+
+async function runHandoff(cliArgs) {
+  const valueOf = (flag) => {
+    const i = cliArgs.indexOf(flag);
+    return i === -1 ? null : cliArgs[i + 1];
+  };
+  console.log('==============================================================================');
+  console.log(' 📦 藏家推薦系統 — 產生交接包（給資訊相關權責單位用自架弱掃平台再驗證）');
+  console.log('==============================================================================');
+  const state = parseEnvState(STATE_FILE);
+
+  // 1. 原始碼：--target，或沿用上次第三階段 3-1 用的（問一句確認）
+  let dir = valueOf('--target');
+  if (!dir) {
+    const saved = state.SAVED_SOURCE_DIR ? String(state.SAVED_SOURCE_DIR) : '';
+    if (!saved) {
+      console.log('❌ 還不知道原始碼在哪裡（還沒跑過第三階段的原始碼掃描）。');
+      console.log(' 👉 請加 --target "<藏家推薦系統原始碼資料夾>" 重跑，例如：node lazy-pack/code-and-ai-audit.mjs --handoff --target "<原始碼資料夾>"');
+      process.exit(2);
+    }
+    const ans = await ask(`\n📁 要打包上次第三階段掃描的原始碼 ${saved} 嗎？(Y/n，直接按 Enter = 是) `);
+    if (/^n(o)?$/i.test(ans)) {
+      console.log('ℹ️ 這次不打包。要換原始碼請加 --target "<原始碼資料夾>" 重跑。');
+      process.exit(2);
+    }
+    dir = saved;
+  }
+  const t = validateTarget(path.resolve(dir));
+  if (!t.ok) {
+    console.log(`❌ ${t.msg}`);
+    console.log(' 👉 請加 --target "<藏家推薦系統原始碼資料夾>" 重跑。');
+    process.exit(2);
+  }
+  if (t.warn) console.log(`⚠️ ${t.warn}`);
+
+  // 2. manifest 的欄位：參數 → 狀態檔 → 問
+  const values = {};
+  const missing = [];
+  for (const f of HANDOFF_FIELDS) {
+    const given = valueOf(f.flag);
+    if (given !== null) {
+      const v = normalizeHandoffField(f.key, given);
+      if (!v) {
+        console.log(`❌ ${f.flag} 的值不合格：「${given}」（${f.label}；不能有雙引號、反斜線、$、反引號，最多 100 字）。`);
+        process.exit(2);
+      }
+      values[f.key] = v;
+      continue;
+    }
+    const saved = normalizeHandoffField(f.key, state[f.key]);
+    if (saved) {
+      values[f.key] = saved;
+      console.log(`ℹ️ ${f.label}：${saved}（上次記下的；要改請加 ${f.flag} "<新的值>"）`);
+      continue;
+    }
+    const v = normalizeHandoffField(f.key, await ask(`\n✏️ 請輸入${f.label}（例如 ${f.example}）：`));
+    if (v) values[f.key] = v;
+    else missing.push(f);
+  }
+  if (missing.length) {
+    console.log(`\n❌ 缺少或看不懂：${missing.map((f) => f.label).join('、')}，這次不打包。`);
+    console.log(` 👉 可以直接用參數帶入：node lazy-pack/code-and-ai-audit.mjs --handoff ${missing.map((f) => `${f.flag} "${f.example}"`).join(' ')}`);
+    process.exit(2);
+  }
+  Object.assign(state, values);
+  try {
+    fs.mkdirSync(REPORTS_DIR, { recursive: true });
+    fs.writeFileSync(STATE_FILE, serializeEnvState(state), 'utf-8');
+  } catch (err) {
+    console.log(`⚠️ 寫不進狀態檔 ${STATE_FILE}（${err.code || err.message}），下次還會再問一次`);
+  }
+
+  // 3. 重跑 3-1，用最新結果決定打不打包
+  const scan = scanCodebase(t.dir);
+  if (!writeFindings([codeFindingsPart(scan)])) {
+    console.log('❌ findings.json 寫不進去，這次不打包。');
+    process.exit(1);
+  }
+  const secrets = scan.findings.filter((f) => f.rule === 'HARDCODED_SECRET');
+  if (secrets.length) {
+    console.log('\n------------------------------------------------------------------------------');
+    console.log(` ⛔ 這次不產生交接包：原始碼裡有 ${secrets.length} 個檔疑似寫死了金鑰或資料庫密碼（SRC-SECRET）`);
+    for (const s of secrets) console.log(`   • ${s.file.split(path.sep).join('/')}`);
+    console.log(' 👉 請系統負責人把金鑰移到 Secret Manager 或環境變數、從程式碼刪掉（已外流的金鑰要作廢重發），再重跑 --handoff。');
+    console.log('    交接包會把原始碼交給弱掃平台，帶著金鑰送出等於把金鑰交出去。');
+    console.log('------------------------------------------------------------------------------');
+    process.exit(1);
+  }
+
+  // 4. 打包：reports/handoff/<系統代號>-<時間>/ 與同名 ZIP
+  const { ts } = nowStamp();
+  let base = `${values.SAVED_HANDOFF_SYSTEM_CODE}-${ts}`;
+  for (let n = 2; fs.existsSync(path.join(HANDOFF_DIR, base)) || fs.existsSync(path.join(HANDOFF_DIR, `${base}.zip`)); n++) base = `${values.SAVED_HANDOFF_SYSTEM_CODE}-${ts}-${n}`;
+  const outDir = path.join(HANDOFF_DIR, base);
+  const zipPath = `${outDir}.zip`;
+  try {
+    fs.mkdirSync(outDir, { recursive: true });
+    const src = collectSourceEntries(t.dir);
+    writeZip(path.join(outDir, 'source.zip'), src.entries);
+    const findings = JSON.parse(fs.readFileSync(FINDINGS_FILE, 'utf-8'));
+    fs.copyFileSync(FINDINGS_FILE, path.join(outDir, 'findings.json'));
+    const full = path.join(REPORTS_DIR, 'full-execution-report.md');
+    const hasReport = fs.existsSync(full);
+    if (hasReport) fs.copyFileSync(full, path.join(outDir, 'full-execution-report.md'));
+    const manifest = {
+      schema_version: HANDOFF_SCHEMA_VERSION,
+      system_name: values.SAVED_HANDOFF_SYSTEM_NAME,
+      system_code: values.SAVED_HANDOFF_SYSTEM_CODE,
+      target_url: state.SAVED_CLOUD_RUN_URL ? String(state.SAVED_CLOUD_RUN_URL) : '',
+      environment: values.SAVED_HANDOFF_ENV,
+      owner: values.SAVED_HANDOFF_OWNER,
+      source_version: sourceVersion(t.dir),
+      generated_at: isoLocal(new Date()),
+      lazy_pack: { name: LAZY_PACK_NAME, version: lazyPackVersion() },
+      test_account: '由負責人另外提供',
+    };
+    fs.writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
+    const counts = Object.fromEntries(SEVERITY_ORDER.map((s) => [s, findings.filter((f) => f && f.severity === s).length]));
+    fs.writeFileSync(path.join(outDir, 'README.md'), handoffReadme(manifest, counts, findings.length, src.entries.length, hasReport), 'utf-8');
+    const files = ['manifest.json', 'findings.json', ...(hasReport ? ['full-execution-report.md'] : []), 'source.zip', 'README.md'];
+    writeZip(zipPath, files.map((f) => {
+      const p = path.join(outDir, f);
+      return { name: `${base}/${f}`, data: fs.readFileSync(p), mtime: fs.statSync(p).mtime };
+    }));
+    console.log('\n------------------------------------------------------------------------------');
+    console.log(' ✅ 交接包已產生');
+    console.log(` • 資料夾：${outDir}`);
+    console.log(` • ZIP（要寄出的就是這個）：${zipPath}（${(fs.statSync(zipPath).size / 1024 / 1024).toFixed(2)} MB）`);
+    console.log(` • 原始碼 ${src.entries.length} 個檔；排除了 ${src.excluded.length} 個（.env*、.git、node_modules、.next 與捷徑）`);
+    if (!hasReport) console.log(' ⚠️ 這台電腦還沒有累計總報告（三個階段都還沒跑過），交接包裡沒有 full-execution-report.md');
+    if (!manifest.target_url) console.log(' ⚠️ 沒有記下網站網址（先跑第一階段會記下），交接包的受測網址是空的');
+    console.log('------------------------------------------------------------------------------');
+  } catch (err) {
+    console.log(`❌ 打包失敗：${err.message}（${outDir}）`);
+    process.exit(1);
+  }
+}
+
+// -----------------------------------------------------------------------------
 // 主程式入口（一開始先說明互動方式與本階段工作項目）
 // -----------------------------------------------------------------------------
 const args = process.argv.slice(2);
@@ -1736,8 +2043,9 @@ const reportMode = args.includes('--report-problem');
 if (!reportMode) startRunLog(args); // --report-problem 自己不留紀錄（它要讀的是上一次的紀錄）
 {
   // 不認得的選項、--target／--source／--repo／--note 缺值：直接結束碼 2（--url 缺值由 3-2 與 3-3／3-4 自己判斷，--api-path 缺值由 3-2 判斷，帶 --mock 時可略過；--api-path 只給 3-2 用）
-  const FLAGS = new Set(['--self-test', '--scan-only', '--eval-only', '--run-ai-eval', '--web-check', '--observatory', '--image-scan', '--enable-image-scan', '--scan-now', '--mock', '--target', '--source', '--repo', '--url', '--api-path', '--report-problem', '--note', '--platform-result']);
-  const NEED_VALUE = ['--target', '--source', '--repo', '--note', '--platform-result'];
+  const FLAGS = new Set(['--self-test', '--scan-only', '--eval-only', '--run-ai-eval', '--web-check', '--observatory', '--image-scan', '--enable-image-scan', '--scan-now', '--mock', '--target', '--source', '--repo', '--url', '--api-path', '--report-problem', '--note', '--platform-result', '--handoff', ...HANDOFF_FIELDS.map((f) => f.flag)]);
+  const NEED_VALUE = ['--target', '--source', '--repo', '--note', '--platform-result', ...HANDOFF_FIELDS.map((f) => f.flag)];
+  const EXAMPLE = { '--source': 'cloud|github|local', '--repo': '"https://github.com/公司帳號/art-collector-web"', '--note': '"<出了什麼狀況>"', '--platform-result': '"<最終弱掃結果的位置>"', ...Object.fromEntries(HANDOFF_FIELDS.map((f) => [f.flag, `"${f.example}"`])) };
   const bad = args.find((a) => a.startsWith('--') && !FLAGS.has(a));
   if (bad) {
     console.log(`❌ 不認得的選項：${bad}。可用：${[...FLAGS].join(' ')}`);
@@ -1746,7 +2054,7 @@ if (!reportMode) startRunLog(args); // --report-problem 自己不留紀錄（它
   for (const f of NEED_VALUE) {
     const i = args.indexOf(f);
     if (i !== -1 && (!args[i + 1] || args[i + 1].startsWith('--'))) {
-      console.log(`❌ ${f} 後面要接值（例如 ${f} ${f === '--source' ? 'cloud|github|local' : f === '--repo' ? '"https://github.com/公司帳號/art-collector-web"' : f === '--note' ? '"<出了什麼狀況>"' : f === '--platform-result' ? '"<最終弱掃結果的位置>"' : '"<原始碼資料夾>"'}）。`);
+      console.log(`❌ ${f} 後面要接值（例如 ${f} ${EXAMPLE[f] || '"<原始碼資料夾>"'}）。`);
       process.exit(2);
     }
   }
@@ -1765,6 +2073,24 @@ if (args.includes('--platform-result')) {
   }
   recordPlatformResult(args[i + 1]);
   process.exit(0);
+}
+{
+  // --handoff 只能搭配 --target 與 manifest 的欄位；manifest 的欄位沒有 --handoff 時沒有作用，直接擋下免得以為記下了
+  const HANDOFF_WITH = ['--target', ...HANDOFF_FIELDS.map((f) => f.flag)];
+  if (args.includes('--handoff')) {
+    const others = args.filter((a) => a.startsWith('--') && a !== '--handoff' && !HANDOFF_WITH.includes(a));
+    if (others.length) {
+      console.log(`❌ --handoff 只能搭配 ${HANDOFF_WITH.join('、')}（這次另外帶了 ${others.join(' ')}）。`);
+      process.exit(2);
+    }
+    await runHandoff(args);
+    process.exit(0);
+  }
+  const stray = HANDOFF_FIELDS.map((f) => f.flag).filter((f) => args.includes(f));
+  if (stray.length) {
+    console.log(`❌ ${stray.join(' ')} 要搭配 --handoff 才有作用。`);
+    process.exit(2);
+  }
 }
 const isSelfTest = args.includes('--self-test');
 const scanOnly = args.includes('--scan-only');
