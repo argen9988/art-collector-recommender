@@ -9,7 +9,6 @@
 > 依據 2026-11-02 定案之「四步閉環」與「四合一透明動作卡」標準，在全新沙盒專案 `art-rec-test-432759` 重跑完整流程。
 
 - [ ] **【真雲端驗收】新專案全流程實測（art-rec-test-432759）**：
-  - [ ] 第一階段：細項 1-1 連結計費帳戶（`01A7BC-FD7482-EE3FB5`）➔ 細項 1-2 雙 Owner ➔ 細項 1-3 預算與配額互動設定 ➔ 細項 1-4 OAuth 白名單 ➔ 產出 Stage 1 複查報告。
   - [ ] 第二階段：建立 Cloud Run 與 Cloud SQL ➔ 執行「試錯（無 VPC 拔 IP 400）➔ 加固（Secret、SSL、備份、規格選型）➔ 複查全綠燈」閉環。
   - [ ] 第三階段：執行 `node lazy-pack/code-and-ai-audit.mjs --run-ai-eval` 跑 3-1～3-5 與 20 題 AI 驗收，產出最終累計總報告。
   - [ ] 交接包：執行 `--handoff` 產出 ZIP 與 manifest。

@@ -45,6 +45,13 @@
      - **全部執行累計總報告**：`reports/full-execution-report.md`（匯總第一、二、三階段最新狀態與「💰 雲端服務開啟清單與每月費用精算表」）
    - 跑完後主動幫使用者打開報告檔，讓使用者能直接把檔案傳給資訊相關權責單位交差。
 
+5. **第二階段細項 2-1 前置智慧探測（聯動細項 3-1 靜態掃描）**：
+   - 進入細項 2-1（建立 Secret Manager 機敏密鑰）前，使用者通常不知道專案程式碼中寫死了哪些金鑰或變數名稱。AI Agent 必須主動先在背景代跑本機程式碼金鑰掃描：
+     ```bash
+     node lazy-pack/code-and-ai-audit.mjs --scan-only
+     ```
+   - 自動解析原始碼與 `.env` 中寫死的 `GEMINI_API_KEY`（`AIza...`）或 `DATABASE_URL`（`postgres://...`），列出探測結果供使用者確認，再代操寫入 Secret Manager。使用者完全不需手動翻找程式碼或猜測金鑰名稱。第三階段總驗收時再次跑 3-1 複查確信金鑰已安全抽離（見決策 D21）。
+
 ---
 
 ## 💬 第一步：開場向使用者展示「你可以怎麼跟我互動？」
@@ -147,6 +154,7 @@
      2. 於「**新增主體 \***」輸入要新增的 Gmail（如公務或主管 Gmail）。
      3. 點擊「**指派角色**」下拉選單，於「基本」分類選取「**Owner (Legacy)**」。
      4. 點擊左下角藍色「**儲存**」送出邀請信。
+     5. ⚠️ **最關鍵收尾**：請被邀請同仁（或開啟主管信箱）收取 Google Cloud 邀請信，點擊「**接受邀請 (Accept Invitation)**」連結，權限才算正式生效！
 4. 👉 **呼叫與執行方式（雙軌機制）**
    - 使用者說「幫我用指令加」，AI 自動代跑指令加入；若遇 Google 個人帳號安全保護機制（`SOLO_MUST_INVITE_OWNERS`），AI 彈出網頁帶路完成。
 
@@ -180,19 +188,23 @@
 #### 【細項 2-1】把 API 金鑰與資料庫密碼收進雲端保險箱（Secret Manager）
 1. 🎯 **白話說明（做什麼、為什麼、好處、費用與安全性）**
    - **這是做什麼**：把 `GEMINI_API_KEY` 與 `DATABASE_URL` 從程式碼中抽出，鎖進 Google 雲端專用保險箱（Secret Manager），只准後端伺服器存取。
+   - **金鑰從哪裡來（AI 前置智慧探測）**：進入本項時，AI 小幫手會先自動翻閱程式碼（執行細項 3-1 靜態掃描），自動找出寫死在程式碼或 `.env` 裡的機敏鍵值與變數名稱，列給你看並直接代操存入保險箱，完全不用使用者手動翻找程式碼（見決策 D21）。
    - **為什麼要做**：防止外部訪客按鍵盤 `F12` 偷走金鑰與資料庫密碼。
    - **費用與安全性**：前 6 組密鑰版本與前 10,000 次存取完全免費（**NT$0**）。不影響現有網站。
 2. 💻 **背後執行的 Shell 指令（透明呈現供工程審計）**
    ```bash
+   # 1. 前置智慧探測：自動翻找程式碼寫死之金鑰（細項 3-1 靜態掃描）
+   node lazy-pack/code-and-ai-audit.mjs --scan-only
+   # 2. 啟用保險箱 API 並建立密鑰槽位存入探測所得之值
    gcloud services enable secretmanager.googleapis.com --project=<你的專案ID>
-   echo -n "<GEMINI_API_KEY值>" | gcloud secrets create GEMINI_API_KEY --data-file=- --project=<你的專案ID>
-   echo -n "<DATABASE_URL值>" | gcloud secrets create DATABASE_URL --data-file=- --project=<你的專案ID>
+   echo -n "<探測到的GEMINI_API_KEY值>" | gcloud secrets create GEMINI_API_KEY --data-file=- --project=<你的專案ID>
+   echo -n "<探測到的DATABASE_URL值>" | gcloud secrets create DATABASE_URL --data-file=- --project=<你的專案ID>
    ```
 3. 🌐 **在 Google Cloud 網頁後台哪裡改（直達網址與手動點選步驟）**
    - **直達網址**：`https://console.cloud.google.com/security/secret-manager?project=<你的專案ID>`
    - **點選步驟**：點擊頂端「**+ 建立密鑰**」➔ 名稱填入 `GEMINI_API_KEY`，填入值 ➔ 點擊「建立密鑰」；重複步驟建立 `DATABASE_URL`。
 4. 👉 **呼叫與執行方式（雙軌機制）**
-   - 使用者說「好」，AI 直接在背景指令建好保險箱槽位，並在 Cloud Run 設定掛載。
+   - AI 先在背景跑 3-1 探測原始碼金鑰，將偵測到的機敏值列出回報使用者；使用者說「好」，AI 直接代跑指令建立密鑰並在 Cloud Run 設定掛載。
 
 ---
 
