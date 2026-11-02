@@ -1,35 +1,18 @@
 # art-collector-recommender — 待辦與階段規劃 (todo-plan.md)
 
-> 遵循全域規則：待辦文件只留還沒做完的項目；做完的項目已移入 [`docs/worklog/2026-10.md`](./worklog/2026-10.md)。
+> 遵循全域規則：待辦文件只留還沒做完的項目；做完的項目已移入 [`docs/worklog/2026-11.md`](./worklog/2026-11.md)。
 
 ---
 
-## 零、 Lazy Pack 工具包補強與審閱待辦（下次開工優先執行）
+## 零、 新沙盒專案實測驗收與交接（開工優先執行）
 
-> **執行順序（使用者 2026-10-31 定）**：① 【錯誤回報】（已做完，收件方式定為電子郵件，見 D15）→ ② 【交接包】→ ③ 【真雲端驗收】（整輪，第一、二、三階段一次驗完，放最後好用完整功能一次驗）。②的附件大小上限要問資訊相關權責單位。其他【小補強】【待確認】【待討論】不排順序，有空檔再做。
+> 依據 2026-11-02 定案之「四步閉環」與「四合一透明動作卡」標準，在全新沙盒專案 `art-rec-test-432759` 重跑完整流程。
 
-- [ ] **【待確認】真實推薦端點的路徑與格式**：段 B2 的 `--url` 測試假設 `POST /api/recommend`、送 JSON（含虛構庫存 `inventory`）、回 `{ recommendations, cc_list, blocked, message }`。真實系統（AI Studio Build 產生的 Next.js）的推薦端點路徑、要不要登入、回傳格式都未知；拋棄式專案驗收或拿到原始碼時查清楚，不同就調 `askOnline` 或用 `--api-path`。
-- [ ] **【真雲端驗收】用拋棄式 GCP 專案跑一輪（見 D7 第 ③ 層）**：使用者用個人帳號建一個新 GCP 專案（不放公司資料）、部署 hello-world Cloud Run，照 `AGENT_SETUP` 從第一階段跑到第三階段，跑完關閉專案（估 NT$0～50）。（2026-10-31 已用拋棄式專案驗完 3-5 映像檔掃描並刪除專案；第一、二階段還沒在真雲端跑過。）跑第二階段時順便驗兩件假 gcloud 測不出來的事（2026-10-31 審閱錯誤回報時發現）：① 開著全程記錄（腳本輸出經管線）時，會改東西的 gcloud（2-2 的 `sql instances patch`，沒加 `--quiet`）還會不會照常問 `(Y/n)`、輸入有沒有效，不行就這類呼叫改成不經管線；② 在 Git Bash 執行中途按 Ctrl-C，看紀錄最後幾行有沒有掉（`tee`、`sed` 會一起收到中斷），掉了就讓那兩段 `trap '' INT`。
-- [ ] **【交接包】`--handoff` 產出給弱掃 Skill 的交接包**（D9、D17）：`code-and-ai-audit.mjs` 加 `--handoff`，產出 `reports/handoff/<系統>-<時間>/`（`manifest.json`、`findings.json`、`full-execution-report.md`、`source.zip`、`README.md`）與它的 ZIP；格式照 `D:\Dev\company\vulnerability-scan-summary\docs\specs\annual-and-system-reports-spec.md` 第 4、8 節（欄位表已寫進第 8 節，`schema_version` 1）。做法照 D17，還沒做的（B1、B2、C 已做完，見施工紀錄 2026-10-31、2026-11-01）：manifest 的欄位名稱已寫進弱掃規格第 4 節（2026-11-01）；C（指南第六步、README 交接包一節）與 B1＋B2＋C 的 Sonnet 審閱（9 份）2026-11-01 已做完，審閱發現照改（D18、施工紀錄），剩整輪真雲端驗收（使用者指定由 Antigravity 的 Gemini Flash High 做）。附件上限（10 MB，超過改雲端硬碟）與收件人（可能不同，`LAZY_PACK_HANDOFF_TO`）資訊單位已回覆，見 D19。
-- [ ] **【待討論】改用 Google／Firebase 服務時的檢測差異**（2026-10-30 使用者要求先列入待辦，之後再詳細討論）：Firebase 的資料靠 Security Rules、App Check 與 IAM 保護，Firebase 的 `apiKey` 官方說不是機密（所以現有 `AIza…` 規則會大量誤報），但 Gemini 的金鑰必須保密。要檢查的差異：`firestore.rules`／`storage.rules` 有沒有 `allow read, write: if true`、登入授權網域與 App Check、API 金鑰有沒有加使用限制、`firebase-adminsdk-*.json` 有沒有進 repo、`firebase.json` 的 hosting 標頭、費用精算（Firebase 方案的預算警示怎麼設**未查證**）；Cloud SQL 的 2-2、2-3 不適用。範圍分四層：A 只讀原始碼（建議先做，做成 `--profile firebase`）、B 唯讀查雲端設定、C 用 Firebase Emulator 在本機實測匿名讀寫（可行性未實測）、D 輸出成自架平台追蹤總表格式。
-
----
-
-## 第一階段：立即止血與基礎防護（對應 `gcp-setup-and-check.sh --stage 1`）
-
-- [ ] **【細項 1-1】確認 GCP 專案綁定 Billing（切換 Paid Tier）**：確認專案處於 `Pay-as-you-go`，保障藏家資料 100% 不被用於模型訓練。
-- [ ] **【細項 1-2】設定雙管理員（Owner）帳號共管**：將部門公務專用 Gmail 與主管 Gmail 共同設為專案 `Owner`（至少 2 人互為備援）。
-- [ ] **【細項 1-3】設定軟硬雙重成本止損與同仁 Gmail 白名單**：透過互動問答決定並於 GCP 設定每月預算提醒鈴（預設 NT$1,000）、鎖定 Gemini API 每日呼叫硬上限（預設 1,000 次/日），並於 OAuth consent screen (`Testing` 模式) 加入部門同仁 `@gmail.com` 白名單。
-
-## 第二階段：系統架構加固與規格選型（對應 `gcp-setup-and-check.sh --stage 2`）
-
-- [ ] **【細項 2-1】Secret Manager 金鑰隔離**：將 `GEMINI_API_KEY` 與 `DATABASE_URL` 移入雲端保險箱 Secret Manager 並掛載至 Cloud Run。
-- [ ] **【細項 2-2】Cloud SQL 資料庫內網防護與每日自動備份**：關閉 Cloud SQL 公網 IP（Public IP）、啟用強制 SSL 與每日自動備份（保留 14 天）。
-- [ ] **【細項 2-3】選定 Cloud SQL 資料庫月租方案**：從 6 種規格選單中選定方案（推薦方案 3A：NT$480–560/月 之 `db-g1-small` 搭配平日上下班開機排程，或方案 3B：`db-f1-micro` 加大備份方案）。
-- [ ] **優化系統手動匯入與建檔介面**：簡化業務同仁批次匯入藏家與畫作資料之流程與防呆驗證，並校驗推薦演算法邊界條件。
-
-## 第三階段：上線前原始碼與 AI 紅隊總體檢（對應 `code-and-ai-audit.mjs`）
-
-- [ ] **【細項 3-1】執行本機原始碼金鑰 0 外洩掃描**：確認前端無硬編碼 API Key、資料庫密碼或 `NEXT_PUBLIC_` 機密變數外洩。
-- [ ] **【細項 3-2】執行 20 題 AI 推薦準確度與防惡意套話壓力測試**：以虛構假資料驗證推薦畫作 100% 符合預算與庫存、EDM 無 CC 外洩名單，並成功攔截 Prompt Injection 套話指令。
-- [ ] **產出《全部階段執行累計總報告》並正式導入上線**：彙整 `reports/full-execution-report.md`（含三階段成果與每月雲端費用精算表）回報資訊相關權責單位留存。
+- [ ] **【真雲端驗收】新專案全流程實測（art-rec-test-432759）**：
+  - [ ] 第一階段：細項 1-1 連結計費帳戶（`01A7BC-FD7482-EE3FB5`）➔ 細項 1-2 雙 Owner ➔ 細項 1-3 預算與配額互動設定 ➔ 細項 1-4 OAuth 白名單 ➔ 產出 Stage 1 複查報告。
+  - [ ] 第二階段：建立 Cloud Run 與 Cloud SQL ➔ 執行「試錯（無 VPC 拔 IP 400）➔ 加固（Secret、SSL、備份、規格選型）➔ 複查全綠燈」閉環。
+  - [ ] 第三階段：執行 `node lazy-pack/code-and-ai-audit.mjs --run-ai-eval` 跑 3-1～3-5 與 20 題 AI 驗收，產出最終累計總報告。
+  - [ ] 交接包：執行 `--handoff` 產出 ZIP 與 manifest。
+  - [ ] 關閉專案：驗收完成後執行 `gcloud projects delete art-rec-test-432759 --quiet`。
+- [ ] **【待確認】真實推薦端點的路徑與格式**：真實系統（AI Studio Build 產生的 Next.js）的推薦端點路徑、要不要登入、回傳格式；拿到原始碼時查清楚。
+- [ ] **【待討論】改用 Google／Firebase 服務時的檢測差異**：見 D14。
