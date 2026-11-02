@@ -4,9 +4,9 @@
 
 ## 下一步
 
-1. 銷毀拋棄式沙盒專案 `art-rec-test-432759`（`gcloud projects delete art-rec-test-432759 --quiet`）。建議模型：Gemini Flash（High）或 Sonnet，需使用者在場確認。
-2. 切換至弱掃彙整專案 `D:\Dev\company\vulnerability-scan-summary`，依方案 A/B 執行平台檢測並產出最終弱掃報告，驗證交接包串接。
-3. 回到本專案執行 `node lazy-pack/code-and-ai-audit.mjs --platform-result "<最終報告路徑>"` 完成雙向閉環回填。
+1. 銷毀拋棄式沙盒專案 `art-rec-test-432759`（`gcloud projects delete art-rec-test-432759 --quiet`）。建議模型：Gemini Flash（High），需使用者在場確認。
+2. 切換至弱掃彙整專案 `D:\Dev\company\vulnerability-scan-summary`，依方案 A/B 執行平台檢測並產出最終弱掃報告，驗證交接包串接。建議模型：Gemini Flash（High）即可完全勝任（照既定腳本與小抄執行，屬固定流程操作）；不需使用者在場。
+3. 回到本專案執行 `node lazy-pack/code-and-ai-audit.mjs --platform-result "<最終報告路徑>"` 完成雙向閉環回填。建議模型：Gemini Flash（High）；不需使用者在場。
 
 ## 目標與做到哪
 
