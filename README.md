@@ -4,11 +4,30 @@
 
 ---
 
-## 🚀 一、 最無腦用法（完全不需資訊背景，交給任何 AI 代操電腦）
+## 🚀 一、 快速開始：最無腦用法（完全不需資訊背景，交給任何 AI 代操電腦）
 
-您不需要懂任何程式或終端機指令！只要打開您電腦上的任何一款 AI 工具（**Claude Code、ChatGPT 桌面版／Codex、Antigravity 2、Cursor、OpenCode**），把本專案的 **[`AGENT_SETUP_雲端資安設定與驗收指南.md`](./AGENT_SETUP_雲端資安設定與驗收指南.md)**（或下方 GitHub Raw 網址）貼給 AI，對它說一句話即可：
+您不需要懂任何程式或終端機指令！只要使用任何一款 AI 工具（**Claude Code、ChatGPT 桌面版／Codex、Antigravity 2、Cursor、OpenCode**），AI 即可全程代操完成。
 
-> **「請讀這份指南，幫我執行藏家推薦系統的資安設定與檢查！」**
+### 1. 首次設定（如何取得專案交給 AI？）
+
+如果您電腦裡還沒有本專案，請任選以下一種最順手的方式開始：
+
+- 🌐 **方式 A（最推薦、零門檻）：直接把 GitHub 連結交給 AI**
+  複製專案 GitHub 網址並交給您的 AI 工具：
+  > 👉 專案網址：`https://github.com/argen9988/art-collector-recommender`
+  > 
+  > 💬 **對 AI 說**：*「請幫我 clone 這個 GitHub 專案，並依照裡面的領航指南（AGENT_SETUP_雲端資安設定與驗收指南.md）執行藏家系統 Lazy Pack 體檢！」*  
+  > （AI 就會自動 clone 專案、切換工作目錄並自動開工，您無需手動下載！）
+
+- 📦 **方式 B（從 GitHub 下載 ZIP 包到本機）**
+  1. 前往專案 GitHub 頁面點擊右上角綠色的 **`Code` ➔ `Download ZIP`**，下載後解壓縮至電腦任意資料夾。
+  2. 在解壓後的資料夾開啟終端機或 AI 工具，對 AI 說：*「我已解壓藏家推薦系統，請照指南幫我執行 Lazy Pack 體檢！」*。
+
+### 2. 之後每次啟動（已有專案）
+
+只要在專案根目錄開啟您的 AI 工具，將本專案的 **[`AGENT_SETUP_雲端資安設定與驗收指南.md`](./AGENT_SETUP_雲端資安設定與驗收指南.md)**（或下方 GitHub Raw 網址）貼給 AI，對它說一句話即可：
+
+> **「請讀這份指南，幫我執行藏家推薦系統的資安設定與檢查！」**  
 > `https://raw.githubusercontent.com/argen9988/art-collector-recommender/master/AGENT_SETUP_雲端資安設定與驗收指南.md`
 
 ### 🧠 使用各家 AI 工具時，建議選擇的模型（Model）與努力程度（Effort）
@@ -111,7 +130,24 @@ Lazy Pack 內建自動費用精算器（可隨時執行 `bash lazy-pack/gcp-setu
 
 ---
 
-## 📄 四、 雙軌報告自動輸出（單次階段報告 ＋ 全部執行累計總報告）
+## 🛡️ 四、 安全機制與注意事項（五大資安防線）
+
+本 Lazy Pack 涉及雲端環境設定與程式碼驗收，內部建有嚴格之安全機制與防呆把關：
+
+1. 🔒 **100% 零資料訓練保障（Paid Tier）**：
+   - 強制指引切換為 Google AI Studio Paid Tier 付費層，依 Google 商業服務條款，所有藏家姓名、電話、畫作偏好與對話資料 **100% 不會被 Google 拿去訓練模型，亦禁止人工審閱**。
+2. 🔑 **前端零機密原則（Secret Manager）**：
+   - 程式碼掃描（細項 3-1）會翻遍前端代碼，確保任何 API Key、資料庫密碼或發信 Token **絕不暴露於前端網頁、瀏覽器 F12 或 `NEXT_PUBLIC_` 變數中**，一律由後端雲端保險箱保管。
+3. 🧪 **評測採用 100% 虛構假資料（Dummy Data）**：
+   - 細項 3-2 之 20 題 AI 推薦與紅隊測試，一律使用腳本內建之**虛構藏家、虛構畫作與假金額**進行驗收，絕不讀取或碰觸任何真實藏家名冊與交易個資。
+4. 🛑 **交接包寫死金鑰自動攔截硬防呆（拒絕打包）**：
+   - 執行 `--handoff` 打包交接包前，會對原始碼與文字檔進行深度金鑰複掃。若發現硬編碼金鑰，**腳本會強制以結束碼 1 中止並拒絕打包產出 ZIP**，嚴防敏感憑證外流至其他單位。
+5. 🙈 **本機自動遮蔽與隱私保護**：
+   - 執行過程產生之日誌檔與問題回報檔，皆會自動遮蔽 API Key、資料庫連線字串、個人 Email 與本機使用者名稱，資料不擅自外傳。
+
+---
+
+## 📄 五、 雙軌報告自動輸出（單次階段報告 ＋ 全部執行累計總報告）
 
 每次執行完任一階段或費用精算，腳本都會自動在專案的 `reports/` 資料夾產出兩份 Markdown 報告，方便您直接回報資訊相關權責單位：
 
@@ -122,7 +158,7 @@ Lazy Pack 內建自動費用精算器（可隨時執行 `bash lazy-pack/gcp-setu
 
 ---
 
-## 🆘 遇到錯誤時：一鍵整理問題回報檔
+## 🆘 六、 遇到錯誤時：一鍵整理問題回報檔
 
 腳本出錯或結果怪怪的，不用截圖也不用描述細節，跟 AI 說「**幫我回報問題**」即可。背後做的事：
 
@@ -137,7 +173,7 @@ node lazy-pack/code-and-ai-audit.mjs --report-problem --note "第二階段跑到
 
 ---
 
-## 📦 交給資訊權責單位：交接包（用自架弱掃平台再驗證）
+## 📦 七、 交給資訊權責單位：交接包（用自架弱掃平台再驗證）
 
 第三階段做完後，要請資訊相關權責單位用自架弱掃平台再驗一次時，跟 AI 說「**幫我打包給資訊單位**」即可。背後做的事：
 
@@ -162,7 +198,7 @@ node lazy-pack/code-and-ai-audit.mjs --platform-result "<最終弱掃結果的�
 
 ---
 
-## 🛠️ 五、 進階：手動執行指令參考（由 AI 自動代跑，人類無須背誦）
+## 🛠️ 八、 進階：手動執行指令參考（由 AI 自動代跑，人類無須背誦）
 
 ```bash
 # 於 GCP Cloud Shell（或已安裝 gcloud 之電腦）執行：
@@ -196,10 +232,12 @@ node lazy-pack/code-and-ai-audit.mjs --image-scan                         # 只�
 
 ---
 
-## 📚 六、 專案文件導覽
+## 📚 九、 專案文件導覽
 
 - **[`AGENT_SETUP_雲端資安設定與驗收指南.md`](./AGENT_SETUP_雲端資安設定與驗收指南.md)**：給所有 AI Agent 讀的自動化代操領航指南（含 10 個細項白話說明卡）。
 - **[`docs/assessment-and-sop.md`](./docs/assessment-and-sop.md)**：完整雲端資安評估報告與六大規範 SOP。
+- **[`docs/self-hosted-platform-verification-sop.md`](./docs/self-hosted-platform-verification-sop.md)**：資訊單位自建弱掃平台驗證報告產出標準作業程序 (SOP)。
+- **[`docs/letter-to-users-lazy-pack-guide.md`](./docs/letter-to-users-lazy-pack-guide.md)**：給系統負責人與業務同仁的 Lazy Pack 體檢指引信。
 - **[`docs/edm-feature-implementation-and-pricing.md`](./docs/edm-feature-implementation-and-pricing.md)**：排程以人推畫／以畫推人發送客製化 EDM 開發者實作指南與收費標準說明。
 - **[`config/params.json`](./config/params.json)**：可調參數檔（預算上限、API 配額、備份天數、20 題驗收門檻與 `_說明`）。
 - **[`AGENTS.md`](./AGENTS.md)**：專案架構與開發規範說明。

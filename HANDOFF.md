@@ -1,6 +1,6 @@
-# 交接：自建平台 SOP 完成、沙盒回填閉環與使用者信件產出
+# 交接：README 對齊範本標準補全、正式 SOP 與使用者信件完成
 
-> 寫於 2026-11-02 12:22（Windows，分支 master）。開工時說「開工」或打 /resume-work 讀這份。
+> 寫於 2026-11-02 12:26（Windows，分支 master）。開工時說「開工」或打 /resume-work 讀這份。
 
 ## 下一步
 
@@ -10,12 +10,12 @@
 
 ## 目標與做到哪
 
-新沙盒專案 `art-rec-test-432759` 完成第一、二階段閉環實測全綠燈；定案第三階段前置確認卡；釐清三步驟權責邊界；產出自建弱掃平台正式 SOP（六步驟與網芳 SSOT 規範）；完成沙盒雙軌合併回填測試；產出給使用者的 Lazy Pack 資安體檢說明信（含 GitHub 連結與 ZIP 前置指引）。
+新沙盒專案 `art-rec-test-432759` 完成第一、二階段閉環實測全綠燈；定案第三階段前置確認卡；釐清三步驟權責邊界；產出自建弱掃平台正式 SOP（六步驟與網芳 SSOT 規範）；完成沙盒雙軌合併回填測試；產出給使用者的 Lazy Pack 資安體檢說明信；依據 `project-docs-template.md` 全面重整 README.md（補全首次/每次啟動與五大安全防線），文檔全數 100% 達標。
 
 ## 已完成
 
+- 依規範優化 `README.md`（首次取得/每次啟動拆分、獨立五大安全防線章節、補齊 SOP 指針）
 - 產出自建弱掃平台驗證報告標準作業程序（`docs/self-hosted-platform-verification-sop.md`）
-- 更新 `README.md` 與領航指南之 SOP 指針連結
 - 實測沙盒回填指令 `--platform-result`，累計總報告與狀態檔成功登記雙軌合併結果
 - 產出給使用者的信件草稿（`docs/letter-to-users-lazy-pack-guide.md`，含 GitHub clone 與 Download ZIP 指引）
 - 施工紀錄更新
@@ -27,14 +27,14 @@
 
 ## 這次定下的決策
 
-- 自建弱掃平台正式環境 SOP 標準化（測試環境代表原則、ZAP 檔名日期規範、網芳 SSOT 發布；見 SOP 文件）
+- README.md 結構對齊範本標準（七大必要章節完整達標；見施工紀錄 2026-11-02）
 
 ## 相關檔案
 
+- `D:\Dev\company\art-collector-recommender\README.md`：操作手冊（對齊範本規範）
 - `D:\Dev\company\art-collector-recommender\docs\self-hosted-platform-verification-sop.md`：自建平台 SOP
 - `D:\Dev\company\art-collector-recommender\docs\letter-to-users-lazy-pack-guide.md`：給使用者的信
 - `D:\Dev\company\art-collector-recommender\AGENT_SETUP_雲端資安設定與驗收指南.md`：領航指南
-- `D:\Dev\company\art-collector-recommender\README.md`：操作手冊
 - `D:\Dev\company\art-collector-recommender\docs\worklog\2026-11.md`：施工紀錄
 
 ## 踩過的坑
