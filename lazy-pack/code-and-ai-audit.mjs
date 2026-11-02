@@ -2132,15 +2132,14 @@ async function runHandoff(cliArgs) {
     : `   3. 附件：${path.basename(zipPath)}（位置見上面）`);
   console.log(draftOk ? '   4. 內文可複製草稿檔裡的文字' : '   4. 內文寫系統名稱、受測網址，並請對方驗證完回覆最終弱掃結果的位置');
   console.log('   測試帳號不要寫在信裡，另外交給資訊相關權責單位。');
-  console.log('\n 🔄【自架弱掃平台串接與無腦回填指南（方案 A / B）】：');
-  console.log('   🤖 方案 A（讓 AI 代操，最推薦無腦）：');
-  console.log('      • 到弱掃專案對 AI 說：「這是剛產出的藏家推薦系統交接包，幫我匯入自架平台驗證並產出最終弱掃結果」');
-  console.log('      • 回本專案對 AI 說：「弱掃平台測完了，幫我把結果回填到 Lazy Pack 總報告」');
-  console.log('   📋 方案 B（手動跑指令，小抄預填）：');
-  console.log('      1. 至弱掃專案目錄執行檢測與彙整：');
-  console.log('         cd D:/Dev/company/vulnerability-scan-summary && python scripts/generate_system_final_reports.py --year 2026');
-  console.log('      2. 複製產出的報告路徑，在本專案執行回填（指令範本）：');
-  console.log(`         node lazy-pack/code-and-ai-audit.mjs --platform-result "D:/Dev/company/vulnerability-scan-summary/reports/2026/final/${values.SAVED_HANDOFF_SYSTEM_CODE}/final_report.json"`);
+  console.log('\n 🔄【交接包後續處理三步驟（權責劃分指引）】：');
+  console.log('   👉 步驟一（系統負責人）：把上面的 ZIP 寄給資訊相關權責單位（信件草稿已備妥），即可暫時休息、等待回覆！');
+  console.log('   🏢 步驟二（資訊權責單位接手）：由資安同仁於內網自架平台（ZAP/SonarQube）複驗並彙整產出最終報告。');
+  console.log('      （資訊同仁在弱掃專案可選用：方案 A 讓 AI 代操，或方案 B 執行 python scripts/generate_system_final_reports.py --year 2026）');
+  console.log('   🎯 步驟三（系統負責人收尾）：收到資訊單位回信（附最終報告路徑）後，在本專案執行回填指令即可完成總報告閉環！');
+  console.log('');
+  console.log('   ✅ 步驟三回填指令範本（等收到資訊單位回覆後執行）：');
+  console.log(`      node lazy-pack/code-and-ai-audit.mjs --platform-result "<資訊單位回覆的最終弱掃結果路徑>"`);
   console.log('------------------------------------------------------------------------------');
 }
 
