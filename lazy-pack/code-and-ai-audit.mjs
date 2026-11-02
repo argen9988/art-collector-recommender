@@ -2474,6 +2474,10 @@ if (imageScan && !fullRun && imageResult && !imageResult.hasResult) {
 }
 if (codeResult.passed && aiResult.passed && (!webResult || webResult.passed) && (!imageResult || imageResult.passed)) {
   console.log(' 🎉 第三階段總體檢結果：PASS（全數通過，符合上線驗收標準）');
+  console.log('\n 👉【下一步建議動作】：');
+  console.log('    第三階段驗收已全數通過！若需提供給資訊相關權責單位進行自架弱掃平台驗證，');
+  console.log('    請執行交接包打包指令（或跟 AI 說「幫我打包交接包」）：');
+  console.log('    node lazy-pack/code-and-ai-audit.mjs --handoff');
   console.log('==============================================================================');
   process.exit(0);
 } else {
