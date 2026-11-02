@@ -153,6 +153,7 @@ node lazy-pack/code-and-ai-audit.mjs --report-problem --note "第二階段跑到
     node lazy-pack/code-and-ai-audit.mjs --platform-result "<資訊單位回覆的最終弱掃結果位置>"
     ```
     累計總報告的「自架平台驗證」一行就從「未執行（選做）」正式更新為「✅ 通過（見最終弱掃結果 …）」，全案圓滿閉環。
+  - 📖 **詳細操作手冊**：資訊權責單位之內網自建平台檢測、雙軌報告彙整與網芳發布之完整作業標準，詳見 [`docs/self-hosted-platform-verification-sop.md`](docs/self-hosted-platform-verification-sop.md)。
 
 ```bash
 node lazy-pack/code-and-ai-audit.mjs --handoff --target "<藏家系統原始碼路徑>"

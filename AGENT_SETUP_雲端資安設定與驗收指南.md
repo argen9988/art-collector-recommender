@@ -436,3 +436,4 @@
        ```
        （若使用 AI 代操，只需對 AI 說：「*弱掃平台測完了，幫我把結果回填到 Lazy Pack 總報告*」）
      - 累計總報告 `reports/full-execution-report.md` 的「自架平台驗證」一行會從「未執行（選做）」正式更新為「✅ 通過（見最終弱掃結果 …）」，完成全案驗收。位置不能有雙引號、換行，也不能超過 500 字。
+   - 📖 **詳細 SOP 指引**：關於資訊權責單位自建弱掃平台操作、資料夾部署、雙軌合併產生器與網芳發布之完整正式環境規範，詳見 [`docs/self-hosted-platform-verification-sop.md`](docs/self-hosted-platform-verification-sop.md)。
