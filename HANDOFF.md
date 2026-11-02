@@ -19,6 +19,7 @@
 - 本機 `reports/` 276 份舊報告安全移入資源回收筒並重建空目錄
 - 刪除舊測試專案 `art-rec-test-960198`，建立新專案 `art-rec-test-432759`
 - 完成新專案第一階段步驟 1 唯讀體檢，查明可用計費帳戶 `01A7BC-FD7482-EE3FB5`
+- 去識別化專案歷程與 reflection 已寫入 second-brain 並以 rclone 推上 Google Drive（上傳 2 檔、快照 commit 76 行）
 
 ## 還沒做完
 
