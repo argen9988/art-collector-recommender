@@ -1239,5 +1239,49 @@ LAZY_PACK_REPORT_TO="report@corp.example" run --handoff --target "$(mp "$C")" --
 chk t14w2 "收件人：report@corp.example"
 fchk t14w2-file "$(find "$HD" -maxdepth 1 -name 'TO-B-*-email-draft.txt' | head -1)" "^收件人：report@corp.example$"
 
+# 15. 資料庫雙軌探測與 Firestore 白名單（決策 D23）
+# 15a. 純後端模式：package.json 依賴 @google-cloud/firestore，自動探測為純後端做法 A，月租 NT$0
+FS_BE="$S/fs-backend"; cp -r "$FIX" "$FS_BE"
+node -e "const f = '$(mp "$FS_BE/package.json")'; const p = JSON.parse(require('fs').readFileSync(f, 'utf8')); p.dependencies['@google-cloud/firestore'] = '^7.0.0'; require('fs').writeFileSync(f, JSON.stringify(p, null, 2));"
+run --target "$(mp "$FS_BE")" --scan-only; rc_is t15a $? 0
+chk t15a "採用 Cloud Firestore（純後端存取模式，做法 A"
+grep -q 'SAVED_DB_TYPE="firestore"' "$ST" && grep -q 'SAVED_DB_ARCH="backend"' "$ST" \
+  && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t15a] 狀態檔應記下 SAVED_DB_TYPE=firestore 與 SAVED_DB_ARCH=backend"; }
+grep -q 'Cloud Firestore（Serverless NoSQL）' "$FULL" && grep -q 'NT\$0' "$FULL" \
+  && pass=$((pass+1)) || { fail=$((fail+1)); echo "FAIL [t15a] 累計總報告應列出 Cloud Firestore 且月租 NT\$0"; }
+
+# 15b. 前端直連模式：前端組件含 firebaseConfig 與合法 Client SDK 配置，白名單放行不誤擋
+FS_FE="$S/fs-frontend"; cp -r "$FIX" "$FS_FE"
+mkdir -p "$FS_FE/components"
+DUMMY_FB_KEY="AIzaSy$(head -c 33 < /dev/zero | tr '\0' 'F')"
+DUMMY_LEAK_KEY="AIzaSy$(head -c 33 < /dev/zero | tr '\0' 'G')"
+cat << EOF > "$FS_FE/components/FirebaseClient.tsx"
+'use client';
+import { initializeApp } from 'firebase/app';
+import { getFirestore } from 'firebase/firestore';
+
+const firebaseConfig = {
+  apiKey: "${DUMMY_FB_KEY}",
+  authDomain: "art-collector-test.firebaseapp.com",
+  projectId: "art-collector-test",
+  storageBucket: "art-collector-test.appspot.com",
+  appId: "1:123456789:web:abcdef"
+};
+const app = initializeApp(firebaseConfig);
+export const db = getFirestore(app);
+EOF
+printf 'NEXT_PUBLIC_FIREBASE_API_KEY="%s"\n' "$DUMMY_FB_KEY" > "$FS_FE/.env.example"
+run --target "$(mp "$FS_FE")" --scan-only; rc_is t15b $? 0
+chk t15b "採用 Cloud Firestore（前端直連模式，做法 B"
+nochk t15b "HARDCODED_SECRET"
+nochk t15b "NEXT_PUBLIC_LEAK"
+
+# 15c. 負面測試：前端若混入真實寫死之 GEMINI_API_KEY 或資料庫連線字串，依然嚴格攔截
+cat << EOF >> "$FS_FE/components/FirebaseClient.tsx"
+export const GEMINI_API_KEY = "${DUMMY_LEAK_KEY}";
+EOF
+run --target "$(mp "$FS_FE")" --scan-only; rc_is t15c $? 1
+chk t15c "HARDCODED_SECRET"
+
 echo "PASS=$pass FAIL=$fail SKIP=$skip"
 [ "$fail" -eq 0 ] && [ "$skip" -eq 0 ]

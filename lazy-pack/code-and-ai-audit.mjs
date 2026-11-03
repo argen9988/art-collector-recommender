@@ -186,6 +186,110 @@ function collectFiles(dir, fileList = []) {
 // 3-1 與 --handoff 打包前的檢查共用的金鑰判斷
 const SECRET_KEY_RE = /(?:AIza[0-9A-Za-z_-]{35}|re_[0-9A-Za-z_]{20,}|SG\.[0-9A-Za-z_-]{20,})/;
 const SECRET_DBURL_RE = /postgres(?:ql)?:\/\/[^/\s"']+:[^@\s"']+@[^/\s"']+/i;
+const NEXT_PUBLIC_SENSITIVE_RE = /NEXT_PUBLIC_[A-Z0-9_]*(?:KEY|SECRET|PASSWORD|TOKEN|DATABASE|SMTP|EDM)/;
+
+// 判斷是否為合法的 Firebase Client SDK 參數（官方公開 Client Identifier，非機密私鑰；決策 D23）
+function isFirebaseClientSdkSecret(content) {
+  if (!/AIza[0-9A-Za-z_-]{35}/.test(content)) return false;
+  const hasFirebaseContext = /(?:firebaseConfig|initializeApp|NEXT_PUBLIC_FIREBASE_)/i.test(content)
+    && /(?:authDomain|projectId|appId|messagingSenderId|storageBucket|NEXT_PUBLIC_FIREBASE_)/i.test(content);
+  const isAiKeyContext = /(?:GEMINI|AI_KEY|GENAI|GOOGLE_AI|GEMINI_API_KEY|@google\/genai|@google\/generative-ai|GoogleGenAI|GoogleGenerativeAI)/i.test(content);
+
+  if (hasFirebaseContext && !isAiKeyContext) {
+    const stripped = content
+      .replace(/apiKey\s*:\s*['"]AIza[0-9A-Za-z_-]{35}['"]/g, '')
+      .replace(/NEXT_PUBLIC_FIREBASE_[A-Z0-9_]*\s*=\s*['"]?AIza[0-9A-Za-z_-]{35}['"]?/g, '')
+      .replace(/['"]AIza[0-9A-Za-z_-]{35}['"](?=\s*,\s*(?:authDomain|projectId|storageBucket))/g, '');
+    return !SECRET_KEY_RE.test(stripped);
+  }
+  return false;
+}
+
+function hasHardcodedSecret(content) {
+  if (SECRET_DBURL_RE.test(content)) return true;
+  if (/re_[0-9A-Za-z_]{20,}|SG\.[0-9A-Za-z_-]{20,}/.test(content)) return true;
+  if (/AIza[0-9A-Za-z_-]{35}/.test(content)) {
+    if (isFirebaseClientSdkSecret(content)) return false;
+    return true;
+  }
+  return false;
+}
+
+function hasNextPublicLeak(content) {
+  // 排除官方合規之 Firebase Client 公開環境變數（例如 NEXT_PUBLIC_FIREBASE_API_KEY）
+  const stripped = content.replace(/NEXT_PUBLIC_FIREBASE_[A-Z0-9_]+/g, '');
+  return NEXT_PUBLIC_SENSITIVE_RE.test(stripped);
+}
+
+// 探測程式碼之資料庫特徵與架構（決策 D23：動態判定純後端做法 A 或前端直連做法 B）
+function detectDatabaseFeatures(targetDir) {
+  let dbType = 'unknown';
+  let dbArch = 'unknown'; // 'backend' (做法 A) 或 'client' (做法 B)
+  let hasSql = false;
+  let hasFirestore = false;
+  let hasFirebaseClient = false;
+  let hasFirebaseAdmin = false;
+
+  const pkgPath = path.join(targetDir, 'package.json');
+  if (fs.existsSync(pkgPath)) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+      const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+      if (deps['@google-cloud/firestore'] || deps['firebase-admin']) {
+        hasFirestore = true;
+        hasFirebaseAdmin = true;
+      }
+      if (deps['firebase']) {
+        hasFirestore = true;
+        hasFirebaseClient = true;
+      }
+      if (deps['pg'] || deps['mysql'] || deps['mysql2'] || deps['prisma'] || deps['@prisma/client'] || deps['typeorm'] || deps['drizzle-orm'] || deps['sqlite3']) {
+        hasSql = true;
+      }
+    } catch {}
+  }
+
+  const files = collectFiles(targetDir);
+  let clientFirestoreFound = false;
+  for (const file of files) {
+    const ext = path.extname(file);
+    if (!['.ts', '.tsx', '.js', '.jsx', '.json'].includes(ext)) continue;
+    let content = '';
+    try { content = fs.readFileSync(file, 'utf-8'); } catch { continue; }
+
+    const normFile = file.replace(/\\/g, '/');
+    const isClientFile = /^['"]use client['"]/m.test(content) || normFile.includes('/components/') || normFile.startsWith('components/');
+    const isApiRoute = normFile.includes('/api/') || normFile.includes('/server/') || /(?:^|\/)route\.[jt]sx?$/.test(normFile);
+
+    if (/from\s+['"]firebase\/(?:firestore|app|auth)['"]/.test(content) || /firebaseConfig/.test(content)) {
+      hasFirestore = true;
+      hasFirebaseClient = true;
+      if (isClientFile && !isApiRoute) {
+        clientFirestoreFound = true;
+      }
+    }
+    if (/from\s+['"]firebase-admin/.test(content) || /from\s+['"]@google-cloud\/firestore['"]/.test(content)) {
+      hasFirestore = true;
+      hasFirebaseAdmin = true;
+    }
+    if (/postgres(?:ql)?:\/\//i.test(content) || /from\s+['"]pg['"]/.test(content) || /from\s+['"]mysql2?['"]/.test(content)) {
+      hasSql = true;
+    }
+  }
+
+  if (hasFirestore && !hasSql) {
+    dbType = 'firestore';
+    dbArch = clientFirestoreFound ? 'client' : 'backend';
+  } else if (hasSql && !hasFirestore) {
+    dbType = 'cloud_sql';
+    dbArch = 'backend';
+  } else if (hasFirestore && hasSql) {
+    dbType = clientFirestoreFound ? 'firestore' : 'cloud_sql';
+    dbArch = clientFirestoreFound ? 'client' : 'backend';
+  }
+
+  return { dbType, dbArch, hasFirestore, hasSql, hasFirebaseClient, hasFirebaseAdmin, clientFirestoreFound };
+}
 
 function scanCodebase(targetDir) {
   console.log('\n------------------------------------------------------------------------------');
@@ -198,6 +302,18 @@ function scanCodebase(targetDir) {
 
   const findings = [];
   let skippedChecks = 0;
+
+  // 動態資料庫特徵探測（決策 D23）
+  const dbInfo = detectDatabaseFeatures(targetDir);
+  if (dbInfo.dbType === 'firestore') {
+    if (dbInfo.dbArch === 'backend') {
+      console.log('ℹ️  [資料庫架構探測] 偵測到採用 Cloud Firestore（純後端存取模式，做法 A，最推薦）；雲端安全規則應阻絕外網直讀。');
+    } else {
+      console.log('ℹ️  [資料庫架構探測] 偵測到採用 Cloud Firestore（前端直連模式，做法 B）；白名單放行合規 Client SDK，提醒注意雲端 Security Rules。');
+    }
+  } else if (dbInfo.dbType === 'cloud_sql') {
+    console.log('ℹ️  [資料庫架構探測] 偵測到採用 Cloud SQL（關聯式資料庫架構）；密碼與連線字串應收進 Secret Manager。');
+  }
 
   // 檢查 1：.gitignore 是否已排除 .env
   const gitignorePath = path.join(targetDir, '.gitignore');
@@ -219,18 +335,16 @@ function scanCodebase(targetDir) {
   let nextPublicLeakCount = 0;
   let clientSdkLeakCount = 0;
 
-  const nextPublicSensitiveRegex = /NEXT_PUBLIC_[A-Z0-9_]*(?:KEY|SECRET|PASSWORD|TOKEN|DATABASE|SMTP|EDM)/;
-
   for (const file of files) {
     const content = fs.readFileSync(file, 'utf-8');
     const relPath = path.relative(targetDir, file);
 
-    if (SECRET_KEY_RE.test(content) || SECRET_DBURL_RE.test(content)) {
+    if (hasHardcodedSecret(content)) {
       hardcodedKeyCount++;
       findings.push({ rule: 'HARDCODED_SECRET', file: relPath, msg: '偵測到疑似硬編碼之 API Key (Google/Resend/SendGrid) 或含密碼之資料庫連線字串' });
     }
 
-    if (nextPublicSensitiveRegex.test(content)) {
+    if (hasNextPublicLeak(content)) {
       nextPublicLeakCount++;
       findings.push({ rule: 'NEXT_PUBLIC_LEAK', file: relPath, msg: '偵測到使用 NEXT_PUBLIC_ 暴露敏感金鑰或 EDM 憑證名稱' });
     }
@@ -256,7 +370,7 @@ function scanCodebase(targetDir) {
     skippedChecks++;
   }
 
-  return { passed: findings.length === 0, fileCount: files.length, skippedChecks, findings };
+  return { passed: findings.length === 0, fileCount: files.length, skippedChecks, findings, dbInfo };
 }
 
 // -----------------------------------------------------------------------------
@@ -1143,6 +1257,8 @@ function parseEnvState(filePath) {
     SAVED_SECRET_COUNT: 2,
     SAVED_BUDGET_MONTHLY_NTD: 1000,
     SAVED_API_QUOTA_RPD: 1000,
+    SAVED_DB_TYPE: 'cloud_sql',
+    SAVED_DB_ARCH: 'backend',
   };
   if (!fs.existsSync(filePath)) return state;
   const lines = fs.readFileSync(filePath, 'utf-8').split(/\r?\n/);
@@ -1165,10 +1281,20 @@ function writeReports(params, runScan, runEval, codeResult, aiResult, targetDir,
   const humanTime = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
 
   const state = parseEnvState(STATE_FILE);
+  if (codeResult && codeResult.dbInfo && codeResult.dbInfo.dbType !== 'unknown') {
+    state.SAVED_DB_TYPE = codeResult.dbInfo.dbType;
+    state.SAVED_DB_ARCH = codeResult.dbInfo.dbArch;
+  }
+  const isFirestore = (state.SAVED_DB_TYPE === 'firestore');
+  if (isFirestore && (!state.SAVED_DB_CHOICE_LABEL || state.SAVED_DB_CHOICE_LABEL.includes('db-g1-small') || state.SAVED_DB_CHOICE_LABEL.includes('db-f1-micro'))) {
+    state.SAVED_DB_CHOICE_LABEL = 'Serverless 原生模式（免費額度內：每日 5 萬讀/2 萬寫）';
+    state.SAVED_DB_MIN_NTD = 0;
+    state.SAVED_DB_MAX_NTD = 0;
+  }
   const budgetNtd = Number(state.SAVED_BUDGET_MONTHLY_NTD || params.budget_monthly_ntd);
   const quotaRpd = Number(state.SAVED_API_QUOTA_RPD || params.api_quota_rpd);
-  const dbMin = Number(state.SAVED_DB_MIN_NTD || 480);
-  const dbMax = Number(state.SAVED_DB_MAX_NTD || 560);
+  const dbMin = isFirestore ? 0 : Number(state.SAVED_DB_MIN_NTD || 480);
+  const dbMax = isFirestore ? 0 : Number(state.SAVED_DB_MAX_NTD || 560);
   const edmMax = Number(state.SAVED_EDM_MAX_NTD || 0);
   // 3-5 查得到開通狀態時記下來，累計總報告的費用精算照它算（查不到就沿用上次記下的）
   if (image && image.autoEnabled !== null) state.SAVED_IMAGE_SCAN_ENABLED = image.autoEnabled ? 1 : 0;
@@ -1223,6 +1349,7 @@ function writeReports(params, runScan, runEval, codeResult, aiResult, targetDir,
     '',
     `- **執行時間**：${humanTime}`,
     ...(runScan ? [`- **掃描的原始碼資料夾**：${targetDir}`] : []),
+    `- **資料庫架構探測**：${state.SAVED_DB_TYPE === 'firestore' ? `Cloud Firestore（Serverless NoSQL，${state.SAVED_DB_ARCH === 'client' ? '前端直連做法 B' : '純後端做法 A，最推薦'}）` : `Cloud SQL（關聯式資料庫，${state.SAVED_DB_CHOICE_LABEL}）`}`,
     `- **細項 3-1（本機原始碼金鑰外洩掃描）**：${scanStatus}`,
     `- **細項 3-2（${params.eval_question_count} 題 AI 推薦與防套話紅隊測試）**：${evalStatus}`,
     ...(runEval ? [`- **3-2 測試對象**：${evalTargetLabel}`] : []),
@@ -1279,7 +1406,7 @@ function writeReports(params, runScan, runEval, codeResult, aiResult, targetDir,
     '| 階段名稱 | 涵蓋規範項目 | 最新執行時間 | 最新狀態與成果摘要 |',
     '| :--- | :--- | :---: | :--- |',
     `| **第一階段：立即止血與基礎防護** | 1-1 切換 Paid Tier 零訓練保障<br>1-2 雙 Owner 帳號共管<br>1-3 預算提醒、API 硬上限與 Gmail 白名單 | ${state.STAGE1_LAST_RUN} | ${state.STAGE1_SUMMARY} |`,
-    `| **第二階段：系統架構加固與規格選型** | 2-1 Secret Manager 金鑰隔離<br>2-2 Cloud SQL 關公網 IP / SSL / 每日備份<br>2-3 資料庫月租規格選單<br>2-4 & 2-5 選配 Vertex AI / 排程 EDM | ${state.STAGE2_LAST_RUN} | ${state.STAGE2_SUMMARY} |`,
+    `| **第二階段：系統架構加固與規格選型** | 2-1 Secret Manager 金鑰隔離<br>2-2 資料庫網路防護與安全規則<br>2-3 資料庫月租規格與配額選單<br>2-4 & 2-5 選配 Vertex AI / 排程 EDM | ${state.STAGE2_LAST_RUN} | ${state.STAGE2_SUMMARY} |`,
     `| **第三階段：上線前原始碼與 AI 總體檢** | 3-1 原始碼金鑰 0 外洩靜態掃描<br>3-2 20 題 AI 推薦準確度與防套話紅隊測試<br>3-3 網址預檢<br>3-4 MDN Observatory 評分<br>3-5 映像檔漏洞掃描 | ${state.STAGE3_LAST_RUN} | ${state.STAGE3_SUMMARY} |`,
     '',
     '## 二、 💰 雲端服務開啟清單與每月費用精算總表',
@@ -1287,7 +1414,9 @@ function writeReports(params, runScan, runEval, codeResult, aiResult, targetDir,
     '| 雲端服務項目 | 目前開啟與設定狀態 | 預估日常月費 (NTD) | 極端滿載封頂月費 (NTD) |',
     '| :--- | :--- | :---: | :---: |',
     '| **1. Cloud Run（網站容器主機）** | 已啟用（每月前 200 萬次請求免費） | **NT$0** | 約 NT$0～50 |',
-    `| **2. Cloud SQL（關聯式資料庫）** | ${state.SAVED_DB_CHOICE_LABEL} | **約 NT$${dbMin}～${dbMax}** | **約 NT$${dbMin}～${dbMax}** |`,
+    isFirestore
+      ? `| **2. Cloud Firestore（Serverless NoSQL）** | ${state.SAVED_DB_CHOICE_LABEL || 'Serverless 原生模式（免費額度內：每日 5 萬讀/2 萬寫）'} | **NT$0** | **NT$0**（免費額度內） |`
+      : `| **2. Cloud SQL（關聯式資料庫）** | ${state.SAVED_DB_CHOICE_LABEL} | **約 NT$${dbMin}～${dbMax}** | **約 NT$${dbMin}～${dbMax}** |`,
     `| **3. Gemini AI API（Paid Tier）** | 每日呼叫硬上限鎖定 **${quotaRpd} 次/日** | **約 NT$${aiNormalMin}～${aiNormalMax}** | **約 NT$${aiCapMin}～${aiCapMax}** |`,
     `| **4. Secret Manager（雲端保險箱）** | 已建立 **${state.SAVED_SECRET_COUNT} 組**密鑰（前 6 組免費） | **NT$0** | **NT$0** |`,
     '| **5. Google OAuth 2.0（白名單登入）** | Testing 模式白名單（永久免費） | **NT$0** | **NT$0** |',
@@ -1922,7 +2051,7 @@ function packagedSecretFiles(entries) {
   return entries.filter((e) => {
     if (e.data.length > 5 * 1024 * 1024 || e.data.subarray(0, 8192).includes(0)) return false;
     const text = e.data.toString('utf-8');
-    return SECRET_KEY_RE.test(text) || SECRET_DBURL_RE.test(text);
+    return hasHardcodedSecret(text);
   }).map((e) => e.name);
 }
 

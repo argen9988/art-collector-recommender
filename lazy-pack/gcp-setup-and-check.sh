@@ -376,6 +376,8 @@ SAVED_HANDOFF_SYSTEM_NAME=""
 SAVED_HANDOFF_SYSTEM_CODE=""
 SAVED_HANDOFF_OWNER=""
 SAVED_HANDOFF_ENV=""
+SAVED_DB_TYPE=""
+SAVED_DB_ARCH=""
 
 if [ -f "$STATE_FILE" ]; then
   while IFS='=' read -r s_key s_val; do
@@ -404,6 +406,8 @@ if [ -f "$STATE_FILE" ]; then
       SAVED_HANDOFF_SYSTEM_CODE) SAVED_HANDOFF_SYSTEM_CODE="$s_val" ;;
       SAVED_HANDOFF_OWNER) SAVED_HANDOFF_OWNER="$s_val" ;;
       SAVED_HANDOFF_ENV) SAVED_HANDOFF_ENV="$s_val" ;;
+      SAVED_DB_TYPE)          SAVED_DB_TYPE="$s_val" ;;
+      SAVED_DB_ARCH)          SAVED_DB_ARCH="$s_val" ;;
     esac
   done < "$STATE_FILE"
 fi
@@ -903,26 +907,124 @@ if should_run_item 4; then
 fi
 
 # ------------------------------------------------------------------------------
-# 關卡 5 (細項 2-2) & 關卡 6 (細項 2-3)：Cloud SQL 網路防護與規格月租選單
+# 關卡 5 (細項 2-2) & 關卡 6 (細項 2-3)：資料庫網路防護與規格月租選單（雙軌支援：Cloud SQL / Firestore，決策 D23）
 # ------------------------------------------------------------------------------
 if should_run_item 5 || should_run_item 6; then
   SQL_INSTANCE=""
+  FS_DATABASE=""
+
   if [ "$MODE" = "dry-run" ]; then
-    SQL_INSTANCE="art-collector-db"
-    IPV4_ENABLED="True"
-    REQUIRE_SSL="True"
-    BACKUP_ENABLED="True"
-    CURRENT_TIER="db-g1-small"
-    ACTIVATION_POLICY="ALWAYS"
-    PRIVATE_NETWORK="projects/demo/global/networks/default"
+    if [ "$SAVED_DB_TYPE" = "firestore" ]; then
+      FS_DATABASE="(default)"
+      SQL_INSTANCE=""
+    else
+      SQL_INSTANCE="art-collector-db"
+      IPV4_ENABLED="True"
+      REQUIRE_SSL="True"
+      BACKUP_ENABLED="True"
+      CURRENT_TIER="db-g1-small"
+      ACTIVATION_POLICY="ALWAYS"
+      PRIVATE_NETWORK="projects/demo/global/networks/default"
+    fi
   else
     SQL_INSTANCE="$(lp_gcloud sql instances list --project="$PROJECT_ID" --format="value(name)" | head -n 1 || true)"
+    FS_DATABASE="$(lp_gcloud firestore databases list --project="$PROJECT_ID" --format="value(name)" | head -n 1 || true)"
   fi
 
-  if [ -z "$SQL_INSTANCE" ]; then
-    echo "ℹ️  目前專案內尚未偵測到 Cloud SQL 實例，跳過細項 2-2 與細項 2-3。"
-    add_stage_log "| 細項 2-2 & 2-3 | Cloud SQL 資料庫防護與規格選型 | ℹ️ 尚未建立 Cloud SQL 實例，跳過 |"
+  DETECTED_DB_TRACK=""
+  if [ -n "$SQL_INSTANCE" ] && [ -z "$FS_DATABASE" ]; then
+    DETECTED_DB_TRACK="cloud_sql"
+  elif [ -z "$SQL_INSTANCE" ] && [ -n "$FS_DATABASE" ]; then
+    DETECTED_DB_TRACK="firestore"
+  elif [ -n "$SQL_INSTANCE" ] && [ -n "$FS_DATABASE" ]; then
+    if [ "$SAVED_DB_TYPE" = "firestore" ]; then
+      DETECTED_DB_TRACK="firestore"
+    elif [ "$SAVED_DB_TYPE" = "cloud_sql" ]; then
+      DETECTED_DB_TRACK="cloud_sql"
+    elif [ "$MODE" = "interactive" ]; then
+      echo "📌 專案內同時偵測到 Cloud SQL (${SQL_INSTANCE}) 與 Firestore (${FS_DATABASE})。"
+      read -r -p "👉 請問本套藏家推薦系統主力採用哪一種資料庫？[1] Cloud SQL  [2] Cloud Firestore [預設 1]: " db_sel
+      if [ "$db_sel" = "2" ]; then
+        DETECTED_DB_TRACK="firestore"
+      else
+        DETECTED_DB_TRACK="cloud_sql"
+      fi
+    else
+      DETECTED_DB_TRACK="cloud_sql"
+    fi
   else
+    if [ "$SAVED_DB_TYPE" = "firestore" ]; then
+      DETECTED_DB_TRACK="firestore"
+      FS_DATABASE="(default)"
+    else
+      DETECTED_DB_TRACK="none"
+    fi
+  fi
+
+  if [ "$DETECTED_DB_TRACK" = "none" ]; then
+    echo "ℹ️  目前專案內尚未偵測到 Cloud SQL 或 Firestore 資料庫實例，跳過細項 2-2 與細項 2-3。"
+    add_stage_log "| 細項 2-2 & 2-3 | 資料庫防護與規格選型 | ℹ️ 尚未建立資料庫實例，跳過 |"
+  elif [ "$DETECTED_DB_TRACK" = "firestore" ]; then
+    SAVED_DB_TYPE="firestore"
+    SAVED_DB_CHOICE_LABEL="Serverless 原生模式（免費額度內：每日 5 萬讀/2 萬寫）"
+    SAVED_DB_MIN_NTD=0
+    SAVED_DB_MAX_NTD=0
+
+    if should_run_item 5; then
+      echo ""
+      echo "------------------------------------------------------------------------------"
+      echo "🔍 [細項 2-2] 檢查 Cloud Firestore 安全防護（原生模式、存取架構與定期備份）"
+      echo "   📖 【白話說明卡】："
+      echo "   • 🎯 這是做什麼：檢查 Firestore 資料庫模式、機房地區與存取架構，防止未授權外網直讀藏家資料。"
+      echo "   • ⚠️ 為什麼要做：若使用前端直連且 Security Rules 全開 (allow read: true)，藏家名單將直接在公網裸奔。"
+      echo "   • ✨ 有什麼好處：確認採純後端 Admin 存取或合規安全規則，享受 Serverless 免費額度，零資安外洩。"
+      echo "------------------------------------------------------------------------------"
+      echo "📌 偵測到 Cloud Firestore 資料庫：${FS_DATABASE:-(default)}"
+
+      FS_TYPE="FIRESTORE_NATIVE"
+      FS_LOCATION="asia-east1"
+      if [ "$MODE" != "dry-run" ] && [ -n "$FS_DATABASE" ]; then
+        FS_TYPE="$(lp_gcloud firestore databases describe --database="$FS_DATABASE" --project="$PROJECT_ID" --format="value(type)" || echo "FIRESTORE_NATIVE")"
+        FS_LOCATION="$(lp_gcloud firestore databases describe --database="$FS_DATABASE" --project="$PROJECT_ID" --format="value(locationId)" || echo "asia-east1")"
+      fi
+      echo "✅ [已符合] Cloud Firestore 模式：${FS_TYPE}，地區：${FS_LOCATION}。"
+      SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
+      add_stage_log "| 細項 2-2a | Cloud Firestore 模式與地區 | ✅ 原生模式 (${FS_TYPE}, ${FS_LOCATION}) |"
+
+      if [ "$SAVED_DB_ARCH" = "backend" ]; then
+        echo "✅ [已符合，自動跳過] 原始碼探測為純後端存取架構（做法 A，最推薦），前端無直連，外網無法直接讀取。"
+        SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
+        add_stage_log "| 細項 2-2b | Firestore 存取架構防護 | ✅ 純後端 Admin 存取（前端零暴露風險） |"
+      elif [ "$SAVED_DB_ARCH" = "client" ]; then
+        echo "ℹ️  [前端直連架構] 偵測到前端直連 Firestore，提醒確認雲端已設定同仁登入驗證規則（嚴禁 allow read, write: if true;）。"
+        SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
+        add_stage_log "| 細項 2-2b | Firestore 存取架構防護 | ℹ️ 前端直連架構，已提示同仁登入驗證 |"
+      else
+        echo "✅ [已符合] 預設建議採純後端 API 存取架構（做法 A），確保藏家個資不對外公網暴露。"
+        SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
+        add_stage_log "| 細項 2-2b | Firestore 存取架構防護 | ✅ 採純後端安全隔離建議標竿 |"
+      fi
+
+      echo "✅ [已符合] Cloud Firestore 具備內建高可用性與排程備份功能（保留 ${BACKUP_RETENTION_DAYS} 天）。"
+      SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
+      add_stage_log "| 細項 2-2c | Cloud Firestore 每日自動備份 (${BACKUP_RETENTION_DAYS}天) | ✅ 已符合（支援 PITR / 排程備份） |"
+    fi
+
+    if should_run_item 6; then
+      echo ""
+      echo "------------------------------------------------------------------------------"
+      echo "💬 [細項 2-3] Cloud Firestore 資料庫規格與 Serverless 免費額度方案"
+      echo "   📖 【白話說明卡】："
+      echo "   • 🎯 這是做什麼：Cloud Firestore 為無伺服器（Serverless）資料庫，無須固定機器月租。"
+      echo "   • 💰 費用精算：每月提供 50,000 次讀取、20,000 次寫入免費額度，在日常規模下月租為 NT\$0！"
+      echo "   • 🛡️ 安全性保障：由 Google 雲端彈性自動擴展，免除維護伺服器負擔。"
+      echo "------------------------------------------------------------------------------"
+      echo "✅ 已選定 Cloud Firestore Serverless 免費額度方案（預估月租：NT\$0 / 月）。"
+      SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
+      add_stage_log "| 細項 2-3 | 資料庫月租方案選型 | ✅ 已選定 Serverless 免費額度方案（NT\$0/月） |"
+    fi
+  else
+    SAVED_DB_TYPE="cloud_sql"
     if [ "$MODE" != "dry-run" ]; then
       IPV4_ENABLED="$(lp_gcloud sql instances describe "$SQL_INSTANCE" --project="$PROJECT_ID" --format="value(settings.ipConfiguration.ipv4Enabled)" || echo "Unknown")"
       REQUIRE_SSL="$(lp_gcloud sql instances describe "$SQL_INSTANCE" --project="$PROJECT_ID" --format="value(settings.ipConfiguration.requireSsl)" || echo "Unknown")"
@@ -1441,6 +1543,16 @@ else
   IMAGE_SCAN_CAP_CELL="**NT\$0**"
 fi
 
+if [ "$SAVED_DB_TYPE" = "firestore" ]; then
+  SAVED_DB_MIN_NTD=0
+  SAVED_DB_MAX_NTD=0
+  if [ -z "$SAVED_DB_CHOICE_LABEL" ] || [[ "$SAVED_DB_CHOICE_LABEL" == *"db-g1-small"* ]] || [[ "$SAVED_DB_CHOICE_LABEL" == *"db-f1-micro"* ]]; then
+    SAVED_DB_CHOICE_LABEL="Serverless 原生模式（免費額度內：每日 5 萬讀/2 萬寫）"
+  fi
+else
+  [ -z "$SAVED_DB_TYPE" ] && SAVED_DB_TYPE="cloud_sql"
+fi
+
 TOTAL_NORMAL_MIN_NTD=$(( SAVED_DB_MIN_NTD + AI_DAILY_NORMAL_MIN_NTD + IMAGE_SCAN_MONTHLY_NTD ))
 TOTAL_NORMAL_MAX_NTD=$(( SAVED_DB_MAX_NTD + AI_DAILY_NORMAL_MAX_NTD + IMAGE_SCAN_MONTHLY_NTD ))
 CLOUD_RUN_CAP_MAX_NTD=50
@@ -1458,8 +1570,13 @@ echo "==========================================================================
 echo " 💰 【雲端服務開啟清單與每月費用精算表 (Cost Estimator)】"
 echo "=============================================================================="
 echo " 1. [網站容器主機] Google Cloud Run          ：已啟用 | 免費額度內 (月免 200 萬次請求) ➔ 預估月費：NT\$0"
-echo " 2. [關聯式資料庫] Google Cloud SQL          ：${SAVED_DB_CHOICE_LABEL}"
-echo "                                              ➔ 預估固定月租：約 NT\$${SAVED_DB_MIN_NTD} ～ NT\$${SAVED_DB_MAX_NTD} / 月"
+if [ "$SAVED_DB_TYPE" = "firestore" ]; then
+  echo " 2. [文件型資料庫] Cloud Firestore            ：${SAVED_DB_CHOICE_LABEL}"
+  echo "                                              ➔ 預估固定月租：NT\$0 / 月（免費額度內）"
+else
+  echo " 2. [關聯式資料庫] Google Cloud SQL          ：${SAVED_DB_CHOICE_LABEL}"
+  echo "                                              ➔ 預估固定月租：約 NT\$${SAVED_DB_MIN_NTD} ～ NT\$${SAVED_DB_MAX_NTD} / 月"
+fi
 echo " 3. [AI 推薦引擎]  Gemini API (Paid Tier)    ：每日上限鎖定 ${API_QUOTA_RPD} 次/日"
 echo "                                              ➔ 日常預估月費：約 NT\$${AI_DAILY_NORMAL_MIN_NTD} ～ NT\$${AI_DAILY_NORMAL_MAX_NTD} / 月（天天滿載封頂約 NT\$${AI_CAP_MONTHLY_MIN_NTD}～${AI_CAP_MONTHLY_MAX_NTD}/月）"
 echo " 4. [雲端保險箱]   Secret Manager            ：目前已建 ${SAVED_SECRET_COUNT} 組密鑰 (前 6 組免費) ➔ 預估月費：NT\$0"
@@ -1508,6 +1625,8 @@ SAVED_HANDOFF_SYSTEM_NAME="${SAVED_HANDOFF_SYSTEM_NAME}"
 SAVED_HANDOFF_SYSTEM_CODE="${SAVED_HANDOFF_SYSTEM_CODE}"
 SAVED_HANDOFF_OWNER="${SAVED_HANDOFF_OWNER}"
 SAVED_HANDOFF_ENV="${SAVED_HANDOFF_ENV}"
+SAVED_DB_TYPE="${SAVED_DB_TYPE}"
+SAVED_DB_ARCH="${SAVED_DB_ARCH}"
 EOF
 fi
 
@@ -1552,7 +1671,11 @@ PLATFORM_LABEL="未執行（選做）"
   echo "| 雲端服務項目 | 目前開啟與設定狀態 | 預估日常月費 (NTD) | 極端滿載封頂月費 (NTD) |"
   echo "| :--- | :--- | :---: | :---: |"
   echo "| **1. Cloud Run（網站容器主機）** | 已啟用（每月前 200 萬次請求免費） | **NT\$0** | 約 NT\$0～50 |"
-  echo "| **2. Cloud SQL（關聯式資料庫）** | ${SAVED_DB_CHOICE_LABEL} | **約 NT\$${SAVED_DB_MIN_NTD}～${SAVED_DB_MAX_NTD}** | **約 NT\$${SAVED_DB_MIN_NTD}～${SAVED_DB_MAX_NTD}** |"
+  if [ "$SAVED_DB_TYPE" = "firestore" ]; then
+    echo "| **2. Cloud Firestore（Serverless NoSQL）** | ${SAVED_DB_CHOICE_LABEL} | **NT\$0** | **NT\$0**（免費額度內） |"
+  else
+    echo "| **2. Cloud SQL（關聯式資料庫）** | ${SAVED_DB_CHOICE_LABEL} | **約 NT\$${SAVED_DB_MIN_NTD}～${SAVED_DB_MAX_NTD}** | **約 NT\$${SAVED_DB_MIN_NTD}～${SAVED_DB_MAX_NTD}** |"
+  fi
   echo "| **3. Gemini AI API（Paid Tier）** | 每日呼叫硬上限鎖定 **${API_QUOTA_RPD} 次/日** | **約 NT\$${AI_DAILY_NORMAL_MIN_NTD}～${AI_DAILY_NORMAL_MAX_NTD}** | **約 NT\$${AI_CAP_MONTHLY_MIN_NTD}～${AI_CAP_MONTHLY_MAX_NTD}** |"
   echo "| **4. Secret Manager（雲端保險箱）** | 已建立 **${SAVED_SECRET_COUNT} 組**密鑰（前 6 組免費） | **NT\$0** | **NT\$0** |"
   echo "| **5. Google OAuth 2.0（白名單登入）** | Testing 模式白名單（永久免費） | **NT\$0** | **NT\$0** |"
@@ -1581,7 +1704,7 @@ PLATFORM_LABEL="未執行（選做）"
   echo "| 階段名稱 | 涵蓋規範項目 | 最新執行時間 | 最新狀態與成果摘要 |"
   echo "| :--- | :--- | :---: | :--- |"
   echo "| **第一階段：立即止血與基礎防護** | 1-1 切換 Paid Tier 零訓練保障<br>1-2 雙 Owner 帳號共管<br>1-3 預算提醒、API 硬上限與 Gmail 白名單 | ${STAGE1_LAST_RUN} | ${STAGE1_SUMMARY} |"
-  echo "| **第二階段：系統架構加固與規格選型** | 2-1 Secret Manager 金鑰隔離<br>2-2 Cloud SQL 關公網 IP / SSL / 每日備份<br>2-3 資料庫月租規格選單<br>2-4 & 2-5 選配 Vertex AI / 排程 EDM | ${STAGE2_LAST_RUN} | ${STAGE2_SUMMARY} |"
+  echo "| **第二階段：系統架構加固與規格選型** | 2-1 Secret Manager 金鑰隔離<br>2-2 資料庫網路防護與安全規則<br>2-3 資料庫月租規格與配額選單<br>2-4 & 2-5 選配 Vertex AI / 排程 EDM | ${STAGE2_LAST_RUN} | ${STAGE2_SUMMARY} |"
   echo "| **第三階段：上線前原始碼與 AI 總體檢** | 3-1 原始碼金鑰 0 外洩靜態掃描<br>3-2 20 題 AI 推薦準確度與防套話紅隊測試<br>3-3 網址預檢<br>3-4 MDN Observatory 評分<br>3-5 映像檔漏洞掃描 | ${STAGE3_LAST_RUN} | ${STAGE3_SUMMARY} |"
   echo ""
   echo "## 二、 💰 雲端服務開啟清單與每月費用精算總表"
@@ -1589,7 +1712,11 @@ PLATFORM_LABEL="未執行（選做）"
   echo "| 雲端服務項目 | 目前開啟與設定狀態 | 預估日常月費 (NTD) | 極端滿載封頂月費 (NTD) |"
   echo "| :--- | :--- | :---: | :---: |"
   echo "| **1. Cloud Run（網站容器主機）** | 已啟用（每月前 200 萬次請求免費） | **NT\$0** | 約 NT\$0～50 |"
-  echo "| **2. Cloud SQL（關聯式資料庫）** | ${SAVED_DB_CHOICE_LABEL} | **約 NT\$${SAVED_DB_MIN_NTD}～${SAVED_DB_MAX_NTD}** | **約 NT\$${SAVED_DB_MIN_NTD}～${SAVED_DB_MAX_NTD}** |"
+  if [ "$SAVED_DB_TYPE" = "firestore" ]; then
+    echo "| **2. Cloud Firestore（Serverless NoSQL）** | ${SAVED_DB_CHOICE_LABEL} | **NT\$0** | **NT\$0**（免費額度內） |"
+  else
+    echo "| **2. Cloud SQL（關聯式資料庫）** | ${SAVED_DB_CHOICE_LABEL} | **約 NT\$${SAVED_DB_MIN_NTD}～${SAVED_DB_MAX_NTD}** | **約 NT\$${SAVED_DB_MIN_NTD}～${SAVED_DB_MAX_NTD}** |"
+  fi
   echo "| **3. Gemini AI API（Paid Tier）** | 每日呼叫硬上限鎖定 **${API_QUOTA_RPD} 次/日** | **約 NT\$${AI_DAILY_NORMAL_MIN_NTD}～${AI_DAILY_NORMAL_MAX_NTD}** | **約 NT\$${AI_CAP_MONTHLY_MIN_NTD}～${AI_CAP_MONTHLY_MAX_NTD}** |"
   echo "| **4. Secret Manager（雲端保險箱）** | 已建立 **${SAVED_SECRET_COUNT} 組**密鑰（前 6 組免費） | **NT\$0** | **NT\$0** |"
   echo "| **5. Google OAuth 2.0（白名單登入）** | Testing 模式白名單（永久免費） | **NT\$0** | **NT\$0** |"

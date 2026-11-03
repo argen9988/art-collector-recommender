@@ -561,5 +561,27 @@ fchk t17j4-msg "$PR" "^- （gcloud 錯誤）ERROR: (gcloud.sql.instances.describ
 fnochk t17j4 "$PR" "bob@example.com"
 rm -rf "$S/logs"
 
+# 18. 資料庫雙軌探測（Cloud SQL / Firestore，決策 D23）
+# 18a. 偵測到 Firestore：自動走 NoSQL 驗收與 NT$0 精算
+rm -f "$ST"
+FAKE_NO_SQL=1 FAKE_FIRESTORE=1 bash "$SH" --stage 2 --check-only --project proj-a < /dev/null > "$S/out.txt" 2>&1; rc_is t18a $? 0
+chk t18a "偵測到 Cloud Firestore 資料庫"
+chk t18a "已選定 Cloud Firestore Serverless 免費額度方案"
+chk t18a "預估固定月租：NT\\\$0 / 月"
+chkst t18a 'SAVED_DB_TYPE="firestore"'
+chkst t18a "SAVED_DB_MIN_NTD=0"
+chkst t18a "SAVED_DB_MAX_NTD=0"
+
+# 18b. 狀態檔已記為 firestore 時，--stage cost 精算資料庫月租為 NT$0
+bash "$SH" --stage cost --check-only --project proj-a < /dev/null > "$S/out.txt" 2>&1; rc_is t18b $? 0
+chk t18b "Cloud Firestore"
+chk t18b "預估固定月租：NT\\\$0 / 月"
+
+# 18c. 雙軌回歸：若偵測到 Cloud SQL（預設），維持 Cloud SQL 流程
+rm -f "$ST"
+bash "$SH" --stage cost --check-only --project proj-a < /dev/null > "$S/out.txt" 2>&1; rc_is t18c $? 0
+chk t18c "Google Cloud SQL"
+chkst t18c 'SAVED_DB_TYPE="cloud_sql"'
+
 echo "PASS=$pass FAIL=$fail SKIP=$skip"
 [ "$fail" -eq 0 ] && [ "$skip" -eq 0 ]

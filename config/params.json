@@ -16,6 +16,8 @@
     "image_scan_usd_per_image": "細項 3-5 Artifact Analysis 每掃一份映像檔的費用（美元），合法範圍 0～10，預設 0.26（官方定價頁，自動掃描與立即掃描同價）",
     "image_scan_deploys_per_month": "細項 3-5 費用精算用的每月部署次數（每次部署掃一次），合法範圍 1～1000，預設 20",
     "handoff_max_attachment_mb": "--handoff 交接包 ZIP 當信件附件的大小上限（MB），超過時提示改放雲端硬碟（或共用資料夾）；合法範圍 1～1000，預設 10（資訊相關權責單位 2026-11-01 確認的上限）",
+    "firestore_backup_retention_days": "Cloud Firestore 自動排程備份保留天數，合法範圍 1～365，預設 14",
+    "firestore_target_monthly_ntd": "Cloud Firestore 目標月租預算參考值（新台幣元），預設 0（Serverless 免費額度內：每日 5 萬次讀取、2 萬次寫入免費）",
     "usd_twd_rate": "美元換新台幣的匯率（估的，只用來精算費用），合法範圍 20～50，預設 32.5"
   },
   "budget_monthly_ntd": 1000,
@@ -33,5 +35,7 @@
   "image_scan_usd_per_image": 0.26,
   "image_scan_deploys_per_month": 20,
   "handoff_max_attachment_mb": 10,
+  "firestore_backup_retention_days": 14,
+  "firestore_target_monthly_ntd": 0,
   "usd_twd_rate": 32.5
 }

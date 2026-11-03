@@ -52,7 +52,13 @@ case "$args" in
     printf "b-old\tproj-a_cloudbuild\tsource/old.tgz\tadmin-web\nb-new\tproj-a_cloudbuild\tsource/art.tgz\tart-web\n" ;;
   "storage cp gs://proj-a_cloudbuild/source/art.tgz "*)
     [ -n "${FAKE_SOURCE_TGZ:-}" ] && cp "$FAKE_SOURCE_TGZ" "$4" || exit 1 ;;
-  "sql instances list"*"--project=proj-a"*) echo "db-1" ;;
+  "sql instances list"*"--project=proj-a"*)
+    [ "${FAKE_NO_SQL:-0}" = "1" ] && exit 0
+    echo "db-1" ;;
+  "firestore databases list"*"--project=proj-a"*)
+    [ "${FAKE_FIRESTORE:-0}" = "1" ] && echo "(default)" ;;
+  "firestore databases describe"*"type"*) echo "FIRESTORE_NATIVE" ;;
+  "firestore databases describe"*"locationId"*) echo "asia-east1" ;;
   "sql instances describe"*"ipv4Enabled"*) echo "${FAKE_SQL_IPV4:-False}" ;;
   "sql instances describe"*"requireSsl"*) echo "True" ;;
   "sql instances describe"*"backupConfiguration"*) echo "True" ;;

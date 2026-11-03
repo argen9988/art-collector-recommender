@@ -208,16 +208,20 @@
 
 ---
 
-#### 【細項 2-2】關閉資料庫對外公網大門（Public IP）、開啟加密（SSL）與每日自動備份
+#### 【細項 2-2】資料庫安全防護（雙軌主動偵測：Cloud SQL 關公網 IP / SSL / 備份 或 Firestore 安全規則）
 1. 🎯 **白話說明（做什麼、為什麼、好處、費用與安全性）**
-   - **這是做什麼**：關閉公網 IP 阻擋駭客暴力猜密碼、強制 SSL 傳輸加密防止藏家資料被竊聽、設定每日凌晨自動備份（保留 14 天）防誤刪資料。
+   - **這是做什麼**：腳本會主動偵測系統使用的資料庫架構：
+     - **若為 Cloud SQL**：關閉公網 IP 阻擋駭客暴力猜密碼、強制 SSL 傳輸加密防止藏家資料被竊聽、設定每日凌晨自動備份（保留 14 天）防誤刪資料。
+     - **若為 Cloud Firestore**：驗證是否為 Native 原生模式、檢查是否採純後端存取架構（做法 A，最推薦），阻絕外網未經授權直讀藏家資料，並享有定時備份。
    - **費用與安全性**：完全免費（**NT$0**）。關閉公網 IP 前需先配置私有網路（VPC），腳本內建防呆避免 HTTP 400 錯誤。
 2. 💻 **背後執行的 Shell 指令（透明呈現供工程審計）**
    ```bash
-   # 強制 SSL 加密與設定每日凌晨 3 點備份（保留 14 天）
+   # [Cloud SQL] 強制 SSL 加密與設定每日凌晨 3 點備份（保留 14 天）
    gcloud sql instances patch <實例名稱> --project=<你的專案ID> --ssl-mode=ENCRYPTED_ONLY --backup-start-time=19:00 --retained-backups-count=14
-   # 關閉公網 IP（需先配置 Private IP / VPC）
+   # [Cloud SQL] 關閉公網 IP（需先配置 Private IP / VPC）
    gcloud sql instances patch <實例名稱> --project=<你的專案ID> --no-assign-ip
+   # [Firestore] 查詢原生模式與地區
+   gcloud firestore databases describe --database="(default)" --project=<你的專案ID>
    ```
 3. 🌐 **在 Google Cloud 網頁後台哪裡改（直達網址與手動點選步驟）**
    - **直達網址**：`https://console.cloud.google.com/sql/instances/<實例名稱>/overview?project=<你的專案ID>`
@@ -230,10 +234,12 @@
 
 ---
 
-#### 【細項 2-3】互動選擇資料庫（Cloud SQL）月租方案（6 選 1 選單）
+#### 【細項 2-3】互動選擇資料庫月租方案（Cloud SQL 6 選 1 或 Firestore 免費額度）
 1. 🎯 **白話說明（做什麼、為什麼、好處、費用與安全性）**
-   - **這是做什麼**：決定資料庫主機大小與是否休眠。提供 **NT$500–600/月** 甜蜜點方案，不花冤枉錢又能順暢運行。
-   - **方案選單**：
+   - **這是做什麼**：決定資料庫主機大小與是否休眠。
+     - **若為 Cloud Firestore**：為 Serverless 架構免選機型，享每日 5 萬次讀取、2 萬次寫入免費額度，預估固定月租直接為 **NT$0 / 月**！
+     - **若為 Cloud SQL**：提供 **NT$500–600/月** 甜蜜點方案，不花冤枉錢又能順暢運行。
+   - **Cloud SQL 方案選單**：
      - `[1]` 維持現況
      - `[2]` 最省錢款（`db-f1-micro` 24h）：約 NT$280～350/月
      - `[3]` 🌟 **最推薦 500-600 甜區 A**（`db-g1-small` 1.7GB 順暢版 ＋ 平日 08:00–22:00 開機夜間休眠省 58%）：約 **NT$480～560/月**
