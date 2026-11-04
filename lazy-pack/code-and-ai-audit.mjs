@@ -23,7 +23,7 @@
  *   node lazy-pack/code-and-ai-audit.mjs --image-scan [--enable-image-scan] [--scan-now]                 # 只跑 3-5 Artifact Analysis 映像檔漏洞掃描
  *
  *   node lazy-pack/code-and-ai-audit.mjs --report-problem [--note "<出了什麼狀況>"]                        # 出問題時：產生問題回報檔與信件草稿（不寄出）
- *   node lazy-pack/code-and-ai-audit.mjs --platform-result "<最終弱掃結果的位置>"                          # 弱掃 Skill 做完後：記進累計總報告的「自架平台驗證」一行
+ *   node lazy-pack/code-and-ai-audit.mjs --platform-result "<最終弱掃結果的位置>"                          # 資訊單位複驗結案後：記進累計總報告的「自架平台驗證」一行
  *   node lazy-pack/code-and-ai-audit.mjs --handoff [--target "<原始碼>"] [--system-name …] [--system-code …] [--owner …] [--env 正式|dev]  # 產生交接包
  *
  * 交接包（--handoff，D9、D17）：先對原始碼重跑 3-1（沒帶 --target 時問要不要沿用上次第三階段的），掃到寫死的金鑰（SRC-SECRET）整包不出、結束碼 1；
@@ -1196,7 +1196,7 @@ function serializeEnvState(state) {
     .join('\n') + '\n';
 }
 
-// 累計總報告的「自架平台驗證」一行（D9、D17）：弱掃 Skill 做完後，負責人用 --platform-result 記下最終弱掃結果的位置
+// 累計總報告的「自架平台驗證」一行（D9、D17）：資訊同仁複驗合格後，用 --platform-result 記下最終弱掃結果的位置
 const PLATFORM_LINE = '- **自架平台驗證**：';
 function platformResultLabel(state) {
   const where = state.SAVED_PLATFORM_RESULT ? String(state.SAVED_PLATFORM_RESULT) : '';
@@ -2259,16 +2259,16 @@ async function runHandoff(cliArgs) {
   console.log(over
     ? `   3. 把 ${path.basename(zipPath)} 放到雲端硬碟（或共用資料夾），在內文填上連結或位置（不當附件）`
     : `   3. 附件：${path.basename(zipPath)}（位置見上面）`);
-  console.log(draftOk ? '   4. 內文可複製草稿檔裡的文字' : '   4. 內文寫系統名稱、受測網址，並請對方驗證完回覆最終弱掃結果的位置');
+  console.log(draftOk ? '   4. 內文可複製草稿檔裡的文字' : '   4. 內文寫系統名稱、受測網址，請資訊單位協助自架平台複驗');
   console.log('   測試帳號不要寫在信裡，另外交給資訊相關權責單位。');
-  console.log('\n 🔄【交接包後續處理三步驟（權責劃分指引）】：');
+  console.log('\n 🔄【交接包後續處理四步流程（權責劃分指引）】：');
   console.log('   👉 步驟一（系統負責人）：把上面的 ZIP 寄給資訊相關權責單位（信件草稿已備妥），即可暫時休息、等待回覆！');
-  console.log('   🏢 步驟二（資訊權責單位接手）：由資安同仁於內網自架平台（ZAP/SonarQube）複驗並彙整產出最終報告。');
-  console.log('      （資訊同仁在弱掃專案可選用：方案 A 讓 AI 代操，或方案 B 執行 python scripts/generate_system_final_reports.py --year 2026）');
-  console.log('   🎯 步驟三（系統負責人收尾）：收到資訊單位回信（附最終報告路徑）後，在本專案執行回填指令即可完成總報告閉環！');
+  console.log('   🏢 步驟二（資訊權責單位）：由資安同仁於內網自架平台（ZAP/SonarQube）複驗並彙整雙軌報告。');
+  console.log('   🔄 步驟三（多輪往來修正）：若收到審查意見，請將指引交由 AI 協助修復並重新打包交付。');
+  console.log('   🎯 步驟四（資訊單位結案）：複驗全數合格後，由資訊同仁執行回填指令並出具結案報告，全案圓滿閉環。');
   console.log('');
-  console.log('   ✅ 步驟三回填指令範本（等收到資訊單位回覆後執行）：');
-  console.log(`      node lazy-pack/code-and-ai-audit.mjs --platform-result "<資訊單位回覆的最終弱掃結果路徑>"`);
+  console.log('   ℹ️ 資訊同仁結案回填指令參考（由資訊同仁於結案時執行）：');
+  console.log(`      node lazy-pack/code-and-ai-audit.mjs --platform-result "<資訊單位產出之最終弱掃結果路徑>"`);
   console.log('------------------------------------------------------------------------------');
 }
 
@@ -2292,7 +2292,7 @@ function handoffEmailDraft(m, counts, total, zipName, zipBytes, maxMb, over) {
     `- Lazy Pack 檢測結果：共 ${total} 筆（高 ${counts['高']}、中 ${counts['中']}、低 ${counts['低']}、資訊 ${counts['資訊']}），在交接包的 findings.json`,
     `- 測試帳號：${m.test_account}（不放在交接包與這封信裡）`,
     '',
-    '交接包的內容說明見 ZIP 裡的 README.md。驗證完成後，請回覆最終弱掃結果的位置，我會記進 Lazy Pack 的累計總報告。',
+    '交接包的內容說明見 ZIP 裡的 README.md。驗證完成後，若有需調整項目請出具審查意見，全數合規請協助出具結案報告與完成回填，謝謝。',
     '',
     '謝謝',
   ].join('\n');

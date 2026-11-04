@@ -15,8 +15,8 @@
 
 ### 2. 核心資安業務原則
 1. **權責分離原則**：
-   - **藏家系統負責人**：負責跑本機與雲端 Lazy Pack（階段 1～3），產成交接包並交付；收到審查通過信件後執行單一指令回填。**負責人無需操作自建弱掃平台。**
-   - **資訊相關權責單位**：負責在公司內網自建平台（SecurityHub / OWASP ZAP / SonarQube）進行專業複驗，並透過弱掃彙整專案產出最終報告。
+   - **藏家系統負責人**：負責跑本機與雲端 Lazy Pack（階段 1～3），產成交接包並 Email 交付；若收到審查意見由 AI 協助修復並重新打包。**負責人無需操作自建弱掃平台，亦無需手動執行弱掃回填。**
+   - **資訊相關權責單位**：負責在公司內網自建平台（SecurityHub / OWASP ZAP / SonarQube）進行專業複驗、出具多輪審查意見，複驗通過後執行結案雙動作（回填總報告與發送結案通知）。
 2. **測試環境代表原則**（公司弱掃規範）：
    - 對外 URL 包含 `-dev` 者為測試環境。
    - 弱掃執行與驗證一律以測試環境（`-dev`）優先；系統負責人在測試環境完成修復並自檢驗證通過後，其結果**亦代表並視同對應之正式環境已完成修復結案**。
@@ -61,10 +61,9 @@ sequenceDiagram
     Sec->>VSS: 執行 generate_system_final_reports.py
     VSS-->>Sec: 產出 report.html 與 findings-merged.json
     Sec->>FS: 發布報告至網芳目錄 (--publish)
-    Sec->>Dev: Email 回覆審查通過，附上 JSON 報告路徑
-    
-    Dev->>LP: 執行 --platform-result 回填指令
-    LP-->>Dev: 累計總報告標記 ✅ 自架平台驗證通過，正式結案！
+    Sec->>LP: 執行 --platform-result 回填指令
+    LP-->>Sec: 累計總報告標記 ✅ 自架平台驗證通過
+    Sec->>Dev: Email 發送《資安檢測審查與結案報告》（正式結案！）
 ```
 
 ---
@@ -135,26 +134,27 @@ python scripts/generate_system_final_reports.py --year 2026 --system ART-REC --p
 報告將同步歸檔至網芳：
 `\\pecykfs02\VOL111\EC_TEAM\弱點掃描\2026\ART-REC\03_最終弱掃結果\`
 
-#### Email 回信通知負責人
-資訊同仁透過 Email 回信告知負責人審查通過，並附上 JSON 報告檔案路徑：
-> *「藏家推薦系統負責人您好，該系統自架平台複驗與雙軌審查已全數通過，最終報告檔案位於 `\\pecykfs02\VOL111\EC_TEAM\弱點掃描\2026\ART-REC\03_最終弱掃結果\findings-merged.json`，請至專案執行回填完成結案。」*
+#### 執行結案雙動作（回填總報告與正式結案通知）
+複驗全數合規通過後，資訊同仁依序執行：
+1. **動作一（總報告回填）**：在藏家推薦系統目錄執行回填指令（見步驟六）。
+2. **動作二（發送結案通知）**：透過 `company-mail-dispatcher` 正式出具《資安檢測審查與結案報告》Email 給系統負責人及相關主管同仁（範本詳見 [`docs/security-review-and-closing-report-guide.md`](security-review-and-closing-report-guide.md)）。
 
 ---
 
-### 【步驟六：系統負責人回填閉環（正式驗收結案）】
-藏家系統負責人收到回信後，回到藏家專案目錄貼上一行回填指令：
+### 【步驟六：資訊同仁回填閉環與發送結案通知（正式驗收結案）】
+資訊同仁於藏家專案目錄執行回填指令：
 ```bash
 cd D:\Dev\company\art-collector-recommender
 node lazy-pack/code-and-ai-audit.mjs --platform-result "\\pecykfs02\VOL111\EC_TEAM\弱點掃描\2026\ART-REC\03_最終弱掃結果\findings-merged.json"
 ```
-（若資訊同仁提供的是本機或共用路徑，亦可直接帶入該路徑）
+（若使用本機快取路徑，亦可帶入 `D:\Dev\company\vulnerability-scan-summary\reports\2026\final\ART-REC\findings-merged.json`）
 
 #### 驗收成果
 藏家推薦系統的累計總報告 [full-execution-report.md](file:///D:/Dev/company/art-collector-recommender/reports/full-execution-report.md) 之最後一行將正式更新為：
 ```markdown
 - **自架平台驗證**：✅ 通過（雙軌合併審查，見最終弱掃結果 \\pecykfs02\VOL111\EC_TEAM\弱點掃描\2026\ART-REC\03_最終弱掃結果\findings-merged.json）
 ```
-至此，藏家推薦系統從雲端基礎設施、Secret 管理、原始碼與 AI 體檢，到公司自建弱掃平台複驗，全案達成 100% 閉環與上線合規！
+回填完成後，資訊同仁發送正式結案報告 Email，至此，藏家推薦系統從雲端基礎設施、Secret 管理、原始碼與 AI 體檢，到公司自建弱掃平台複驗，全案達成 100% 閉環與上線合規！
 
 ---
 

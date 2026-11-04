@@ -185,19 +185,24 @@ node lazy-pack/code-and-ai-audit.mjs --report-problem --note "第二階段跑到
 - **要問您四件事**：系統名稱、系統代號、系統負責人、環境（正式或 dev）；問過就記下，下次不再問（也可用 `--system-name`、`--system-code`、`--owner`、`--env` 帶入）。缺任何一項就不打包（結束碼 2）；沿用上次原始碼時回答 n 也不打包（結束碼 2）。
 - **信件草稿**：另寫 `reports/handoff/<系統代號>-<時間>-email-draft.txt`。腳本不會寄信，由您寄。收件人信箱不寫在程式裡，交接包的收件人可能和問題回報不同，所以有自己的環境變數 `LAZY_PACK_HANDOFF_TO`（沒設時沿用問題回報的 `LAZY_PACK_REPORT_TO`）；**兩個都不設也沒關係**，草稿會留一行「請填資訊相關權責單位的信箱」讓您自己填。**測試帳號不放進交接包與信裡，另外交給資訊單位。**
 - **ZIP 太大**：超過 `config/params.json` 的 `handoff_max_attachment_mb`（現在是 10 MB，資訊單位確認過的上限）時，不要當附件寄，改放雲端硬碟（或資訊單位同意的共用資料夾），在信裡寫連結或位置（草稿會自動改成這個寫法）。
-- **交接包後續處理三步驟（權責劃分）**：
-  - **步驟一（系統負責人）**：交接包 ZIP 寄出給資訊權責單位後，系統負責人工作即暫告段落，安心等待回覆，**完全無需操作自架弱掃平台**。
-  - **步驟二（資訊權責單位接手）**：資訊同仁收到交接包後，在內網自建弱掃平台進行專業複驗，並透過弱掃專案（可選方案 A 讓 AI 代操，或方案 B 跑腳本）彙整產出最終報告後回信。
-  - **步驟三（系統負責人收尾回填）**：收到資訊同仁回信後，回到本專案執行單一指令（或對 AI 說「*弱掃平台測完了，幫我把結果回填到 Lazy Pack 總報告*」）：
-    ```bash
-    node lazy-pack/code-and-ai-audit.mjs --platform-result "<資訊單位回覆的最終弱掃結果位置>"
-    ```
-    累計總報告的「自架平台驗證」一行就從「未執行（選做）」正式更新為「✅ 通過（見最終弱掃結果 …）」，全案圓滿閉環。
-  - 📖 **詳細操作手冊**：資訊權責單位之內網自建平台檢測、雙軌報告彙整與網芳發布之完整作業標準，詳見 [`docs/self-hosted-platform-verification-sop.md`](docs/self-hosted-platform-verification-sop.md)。
+- **交接包後續四步往來流程（權責劃分與閉環機制）**：
+  - **步驟一（系統負責人交付）**：交接包 ZIP 寄出給資訊權責單位後，系統負責人工作即暫告段落，安心等待回覆，**完全無需操作自架弱掃平台**。
+  - **步驟二（資訊權責單位接手）**：資訊同仁收到交接包後，在內網自建弱掃平台進行專業複驗，並透過弱掃專案（可選方案 A 讓 AI 代操，或方案 B 跑腳本）彙整產出雙軌審查結果。
+  - **步驟三（多輪往來迭代修正）**：
+    - 若初驗發現需調整項目，資訊同仁會回信提供《審查意見與調整建議》（附給 AI 的修復指引）。
+    - 系統負責人只需將指引交給 AI 代為修復，並再次執行打包（`--handoff`）交付複驗（雙方進行第 2、3 次往來修正直至達標）。
+  - **步驟四（資訊同仁結案回填與正式通知）**：
+    - 複驗全數確認通過後，**由資訊同仁**執行結案回填指令：
+      ```bash
+      node lazy-pack/code-and-ai-audit.mjs --platform-result "<最終弱掃結果位置>"
+      ```
+      累計總報告的「自架平台驗證」一行正式更新為「✅ 通過（雙軌合併審查，見最終弱掃結果 …）」。
+    - 資訊同仁透過 `company-mail-dispatcher` 正式出具《資安檢測審查與結案報告》Email 回信給系統負責人與主管同仁，全案圓滿結案。
+  - 📖 **詳細操作手冊**：資訊權責單位之內網自建平台檢測、雙軌報告彙整與網芳發布之完整作業標準，詳見 [`docs/self-hosted-platform-verification-sop.md`](docs/self-hosted-platform-verification-sop.md) 與 [`docs/security-review-and-closing-report-guide.md`](docs/security-review-and-closing-report-guide.md)。
 
 ```bash
 node lazy-pack/code-and-ai-audit.mjs --handoff --target "<藏家系統原始碼路徑>"
-node lazy-pack/code-and-ai-audit.mjs --platform-result "<最終弱掃結果的位置>"
+node lazy-pack/code-and-ai-audit.mjs --platform-result "<最終弱掃結果的位置>"   # 由資訊同仁（或複驗執行者）結案時執行
 ```
 
 ---
@@ -223,7 +228,7 @@ node lazy-pack/code-and-ai-audit.mjs --target "<藏家系統原始碼路徑>" --
 node lazy-pack/code-and-ai-audit.mjs --eval-only --url "<Cloud Run 網址>"                  # 20 題直接打真實線上網站（只考題、不掃原始碼）
 node lazy-pack/code-and-ai-audit.mjs --web-check --url "<Cloud Run 網址>"    # 只跑 3-3 網址預檢＋3-4 Observatory（送出主機名稱前會先問；使用者已同意送出才加 --observatory）
 node lazy-pack/code-and-ai-audit.mjs --handoff --target "<原始碼路徑>"     # 產生交接包與信件草稿（見上一節；掃到寫死的金鑰整包不出）
-node lazy-pack/code-and-ai-audit.mjs --platform-result "<位置>"           # 資訊單位驗完後，記下最終弱掃結果的位置（要單獨用）
+node lazy-pack/code-and-ai-audit.mjs --platform-result "<位置>"           # 資訊單位（或複驗執行者）結案時記下最終弱掃結果的位置（要單獨用）
 node lazy-pack/code-and-ai-audit.mjs --image-scan                         # 只跑 3-5 映像檔漏洞掃描（會花錢的開通與立即掃描要先問您；同意才加 --enable-image-scan、--scan-now）
 ```
 
