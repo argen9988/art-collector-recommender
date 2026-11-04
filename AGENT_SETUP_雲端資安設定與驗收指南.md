@@ -220,15 +220,25 @@
    gcloud sql instances patch <實例名稱> --project=<你的專案ID> --ssl-mode=ENCRYPTED_ONLY --backup-start-time=19:00 --retained-backups-count=14
    # [Cloud SQL] 關閉公網 IP（需先配置 Private IP / VPC）
    gcloud sql instances patch <實例名稱> --project=<你的專案ID> --no-assign-ip
-   # [Firestore] 查詢原生模式與地區
+   # [Firestore] 查詢原生模式、地區與備份狀態
    gcloud firestore databases describe --database="(default)" --project=<你的專案ID>
+   # [Firestore] （若尚未建立）建立原生模式資料庫（建議亞洲台灣地區）
+   gcloud firestore databases create --location=asia-east1 --type=firestore-native --project=<你的專案ID>
    ```
-3. 🌐 **在 Google Cloud 網頁後台哪裡改（直達網址與手動點選步驟）**
-   - **直達網址**：`https://console.cloud.google.com/sql/instances/<實例名稱>/overview?project=<你的專案ID>`
-   - **點選步驟**：
-     - **強制 SSL**：實例 ➔ 左側「**連線**」➔ 頂端「**安全性**」子分頁 ➔ 「SSL/TLS 模式」選「**只允許受 SSL/TLS 加密的連線**」➔ 底部浮動列點「**儲存**」。
-     - **每日自動備份**：實例 ➔ 頂端「**編輯**」➔ 展開「**資料保護 / 備份**」➔ 選「**標準級備份**」➔ 勾選每日自動備份（天數 14，時間選離峰深夜）➔ 捲至最下方點「**儲存**」。
-     - **關閉公網 IP**：實例 ➔ 左側「**連線**」➔「**網路**」子分頁 ➔ 取消勾選「**公用 IP**」（需已配置私人 IP）。
+3. 🌐 **在 Google Cloud / Firebase 網頁後台哪裡改（直達網址與手動點選步驟）**
+   - **若為 Cloud SQL**：
+     - **直達網址**：`https://console.cloud.google.com/sql/instances/<實例名稱>/overview?project=<你的專案ID>`
+     - **點選步驟**：
+       - **強制 SSL**：實例 ➔ 左側「**連線**」➔ 頂端「**安全性**」子分頁 ➔ 「SSL/TLS 模式」選「**只允許受 SSL/TLS 加密的連線**」➔ 底部浮動列點「**儲存**」。
+       - **每日自動備份**：實例 ➔ 頂端「**編輯**」➔ 展開「**資料保護 / 備份**」➔ 選「**標準級備份**」➔ 勾選每日自動備份（天數 14，時間選離峰深夜）➔ 捲至最下方點「**儲存**」。
+       - **關閉公網 IP**：實例 ➔ 左側「**連線**」➔「**網路**」子分頁 ➔ 取消勾選「**公用 IP**」（需已配置私人 IP）。
+   - **若為 Cloud Firestore / Firebase**：
+     - **Google Cloud Console 直達網址**：`https://console.cloud.google.com/firestore/databases?project=<你的專案ID>`
+     - **Firebase Console 直達網址**：`https://console.firebase.google.com/project/<你的專案ID>/firestore`
+     - **點選步驟**：
+       - **確認原生模式與地區**：進入 Firestore ➔ 點選 `(default)` 資料庫 ➔ 確認模式為「**原生模式 (Native Mode)**」，地區建議為亞太地區（如 `asia-east1` 台灣）。
+       - **安全性規則（Rules 防護）**：點選頂端「**規則 (Rules)**」子分頁 ➔ 若採純後端 API 存取（做法 A，最推薦），確認規則為 `allow read, write: if false;`（阻絕外部未授權直讀藏家個資，全由後端 `firebase-admin` / Secret Manager 憑證存取）。若採前端直連（做法 B），確認僅開放已登入同仁存取並嚴禁公開 `allow read: if true;`。
+       - **排程備份與 PITR**：點選左側或頂端「**備份與還原 (Backups)**」分頁 ➔ 確認自動定期備份與 PITR（時間點還原）啟用狀態。
 4. 👉 **呼叫與執行方式（雙軌機制）**
    - 使用者說「幫我改」，AI 執行指令一鍵加固；想自己去後台確認，可隨時呼叫上述點選步驟。
 
@@ -249,12 +259,16 @@
    - **安全性**：切換機型僅重啟約 2～3 分鐘，資料 100% 完好無損。
 2. 💻 **背後執行的 Shell 指令（透明呈現供工程審計）**
    ```bash
-   # 例如切換至甜區方案 A（db-g1-small）
+   # [Cloud SQL] 例如切換至甜區方案 A（db-g1-small）
    gcloud sql instances patch <實例名稱> --project=<你的專案ID> --tier=db-g1-small
+   # [Firestore] 為 Serverless 無伺服器架構，天然享免費額度，無需執行機型切換指令（月租直接 NT$0）
    ```
 3. 🌐 **在 Google Cloud 網頁後台哪裡改（直達網址與手動點選步驟）**
-   - **直達網址**：`https://console.cloud.google.com/sql/instances/<實例名稱>/edit?project=<你的專案ID>`
-   - **點選步驟**：實例 ➔ 頂端「**編輯**」➔「**機器**」下拉選單選「**一般用途 - 共用核心**」➔ 單選「**1 vCPU，1.7 GB (db-g1-small)**」➔ 底部點擊「**儲存**」。
+   - **若為 Cloud SQL**：
+     - **直達網址**：`https://console.cloud.google.com/sql/instances/<實例名稱>/edit?project=<你的專案ID>`
+     - **點選步驟**：實例 ➔ 頂端「**編輯**」➔「**機器**」下拉選單選「**一般用途 - 共用核心**」➔ 單選「**1 vCPU，1.7 GB (db-g1-small)**」➔ 底部點擊「**儲存**」。
+   - **若為 Cloud Firestore**：
+     - **說明**：Firestore 天然為彈性 Serverless 架構，不需選配規格亦無需手動設定開關機排程，後台無須做任何機型異動，每月即享 NT$0 免費額度。
 4. 👉 **呼叫與執行方式（雙軌機制）**
    - 使用者說選 `1` 到 `6` 哪一個號碼，AI 自動下指令切換。
 
