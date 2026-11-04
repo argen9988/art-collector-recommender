@@ -15,6 +15,7 @@ Thumbs.db
 
 # 驗收測試產出之暫存報表與內部信件草稿（不入版控，僅留存於本機）
 reports/
+outbox/
 docs/email-draft-to-director.md
 lazy-pack/reports/*.json
 lazy-pack/reports/*.log
