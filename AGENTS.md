@@ -8,6 +8,18 @@
 - 完整紀錄位置：`D:\Dev\project-records\company\art-collector-recommender\`
 - 推送：自動
 
+## 可以放哪幾台
+- 全部
+
+## 同步
+git 以外要跟著專案走的東西，經 Drive 專案資料區 `dev-data/company/art-collector-recommender/` 同步；在專案裡開 session 與結束時自動跑，兩台改了同一個檔就停下來問、兩份都留。
+
+| 路徑 | 做法 |
+|---|---|
+| `docs/email-draft-to-director.md` | 加密同步 |
+| `outbox/` | 加密同步 |
+| `reports/` | 加密同步 |
+
 ## 技術選型與理由
 
 - **雲端架構與資料庫雙軌支援**：Google AI Studio（Build 模式，維持 **Paid Tier 付費層**以保障客戶資料 100% 不用於模型訓練；亦於 Lazy Pack 內建 **Vertex AI** 互動式啟用選項）＋ Google Cloud Run（Next.js 全端容器）＋ **資料庫雙軌支援**（**Cloud SQL** 關聯式架構 或 **Cloud Firestore** Serverless 免費額度架構，由 Lazy Pack 主動偵測程式碼特徵與雲端資源自動切換驗收與精算，決策 D23）＋ Cloud Scheduler（選配排程觸發以人推畫／以畫推人客製化 EDM）＋ 外部發信 API（Resend / Brevo）（決策見 `docs/decisions/2026-10.md` D1、D5、`docs/decisions/2026-11.md` D23）。
